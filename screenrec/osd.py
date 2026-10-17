@@ -110,3 +110,41 @@ class ScrollBarOsd(QWidget):
 
     def paintEvent(self, _):
         QPainter(self).fillRect(self.rect(), QColor(0, 0, 0))
+
+
+class AreaBorder(QWidget):
+    """Dashed frame just outside the recorded area: shows what's being recorded without being
+    in the recording (region streams only see the area; window streams only the window).
+    Click-through; red while recording, amber while paused."""
+    TITLE = "screenrec — recording area"
+    MARGIN = 3       # logical px between the window edge and the area: 2 px line + 1 px gap
+
+    def __init__(self):
+        super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+                         | Qt.WindowType.WindowTransparentForInput | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.setWindowTitle(self.TITLE)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.paused = False
+
+    @classmethod
+    def outer(cls, rect):
+        """Window geometry (x, y, w, h) for an area rect (x, y, w, h)."""
+        x, y, w, h = rect
+        m = cls.MARGIN
+        return (x - m, y - m, w + 2 * m, h + 2 * m)
+
+    def set_paused(self, on):
+        self.paused = on
+        self.update()
+
+    def paintEvent(self, _):
+        from PyQt6.QtGui import QPen
+        p = QPainter(self)
+        r = self.rect().adjusted(1, 1, -1, -1)
+        p.setPen(QPen(QColor(255, 255, 255, 220), 2))    # light gaps: visible on dark content
+        p.drawRect(r)
+        pen = QPen(QColor("#fdbc4b") if self.paused else QColor("#da4453"), 2)
+        pen.setDashPattern([2, 2])
+        p.setPen(pen)
+        p.drawRect(r)

@@ -127,7 +127,11 @@ class Recorder:
         self.pipeline = Gst.parse_launch("".join(desc))
         self.pipeline.use_clock(Gst.SystemClock.obtain())
         self.crop = self.pipeline.get_by_name("crop")
+        self.src = self.pipeline.get_by_name("src")
         self.ov = self.pipeline.get_by_name("ov")
+        self._ov_pending = None
+        if self.ov:
+            self.ov.get_static_pad("sink").add_probe(Gst.PadProbeType.BUFFER, self._ov_probe)
         self.crop.get_static_pad("sink").add_probe(
             Gst.PadProbeType.EVENT_DOWNSTREAM | Gst.PadProbeType.BUFFER, self._probe)
         bus = self.pipeline.get_bus()
@@ -173,11 +177,17 @@ class Recorder:
             self.crop.set_property(prop, val)
 
     def set_overlay(self, image, x=0, y=0):
-        """Blend a QImage (RGBA8888, stream pixels) at x, y into every frame; None clears it."""
+        """Blend a QImage (RGBA8888, stream pixels) at x, y into every frame; None clears it.
+
+        Only hands the image over: the streaming thread applies it (_ov_probe). Setting the
+        element's properties from here deadlocks — we'd hold the GIL waiting for the element's
+        lock while the streaming thread holds that lock, freeing the previous pixbuf, which
+        needs the GIL."""
         if not self.ov:
             return
         if image is None or image.isNull():
-            self.ov.set_property("alpha", 0.0)
+            self._ov_pending = ("clear",)
+            self._keepalive(1000)
             return
         import gi
         gi.require_version("GdkPixbuf", "2.0")
@@ -187,10 +197,29 @@ class Recorder:
         data = bytes(img.constBits().asarray(img.sizeInBytes()))
         pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(data), GdkPixbuf.Colorspace.RGB, True, 8,
                                              img.width(), img.height(), img.bytesPerLine())
-        self.ov.set_property("pixbuf", pb)
-        self.ov.set_property("offset-x", int(x))
-        self.ov.set_property("offset-y", int(y))
-        self.ov.set_property("alpha", 1.0)
+        self._ov_pending = (pb, int(x), int(y))
+        # a window that doesn't repaint sends no frames: repeat the last one so the drawing
+        # (and its fading) shows up in the video
+        self._keepalive(33)
+
+    def _keepalive(self, ms):
+        if getattr(self, "_keepalive_ms", 1000) != ms:
+            self._keepalive_ms = ms
+            self.src.set_property("keepalive-time", ms)
+
+    def _ov_probe(self, pad, info):
+        """Streaming thread, right before the overlay element: apply the newest image."""
+        upd, self._ov_pending = self._ov_pending, None
+        if upd is not None:
+            if upd[0] == "clear":
+                self.ov.set_property("alpha", 0.0)
+            else:
+                pb, x, y = upd
+                self.ov.set_property("pixbuf", pb)
+                self.ov.set_property("offset-x", x)
+                self.ov.set_property("offset-y", y)
+                self.ov.set_property("alpha", 1.0)
+        return Gst.PadProbeReturn.OK
 
     @property
     def crop_rect(self):

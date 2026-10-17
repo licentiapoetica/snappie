@@ -24,6 +24,7 @@ class Recording:
         self.rec = None
         self.node = None
         self.controls = None
+        self.border = None
         self.overlay = None
         self.watcher = None
         self.parts = []          # finished segments
@@ -169,7 +170,12 @@ class Recording:
         self.controls.pause_toggled.connect(lambda on: self.pause() if on else self.resume())
         self.controls.draw_toggled.connect(self.set_drawing)
         self.controls.show()
-        self.kwin.place(TITLE, *self._area_for_kwin(), mode="below")
+        rect, target = self._area_for_kwin()
+        self.kwin.place(TITLE, rect, target, mode="below")
+        from .osd import AreaBorder
+        self.border = AreaBorder()
+        self.border.show()
+        self.kwin.place(AreaBorder.TITLE, AreaBorder.outer(rect), target, mode="exact", pinned=True)
 
     def _area_for_kwin(self):
         """(rect, target id): the recorded area, relative to the window frame for window streams."""
@@ -182,6 +188,11 @@ class Recording:
     def _hide_controls(self):
         from .controls import TITLE
         self.kwin.unplace(TITLE)
+        if self.border:
+            self.kwin.unplace(self.border.TITLE)
+            self.border.hide()
+            self.border.deleteLater()
+            self.border = None
         if self.controls:
             self.controls.hide()
             self.controls.deleteLater()
@@ -200,6 +211,8 @@ class Recording:
         if self.controls:
             self.controls.set_paused(True)
             self.controls.set_busy(True)
+        if self.border:
+            self.border.set_paused(True)
         log("paused")
         self.rec.stop()  # → _recorded keeps the stream open
         self.app.recording_changed(self)
@@ -216,6 +229,8 @@ class Recording:
         if self.controls:
             self.controls.set_paused(False)
             self.controls.set_busy(True)
+        if self.border:
+            self.border.set_paused(False)
         if self.stream and self.node is not None:
             self._start_segment()
         else:

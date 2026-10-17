@@ -78,7 +78,15 @@ function place() {
     if (opts.once) manual = true;
 }
 function adopt(w) {
-    if (ctl || w.pid != pid || w.caption != caption) return;
+    if (ctl || w.pid != pid) return;
+    if (w.caption != caption) {
+        // the title may arrive after the window: try again when it does
+        if (!w.screenrecWatched) {
+            w.screenrecWatched = true;
+            w.captionChanged.connect(function () { adopt(w); });
+        }
+        return;
+    }
     ctl = w;
     ctl.keepAbove = opts.keepAbove !== false;
     ctl.skipTaskbar = opts.skipTaskbar !== false;
@@ -96,6 +104,15 @@ for (var i = 0; i < all.length; i++) {
 }
 if (target) target.frameGeometryChanged.connect(place);
 workspace.windowAdded.connect(adopt);
+// Qt may replace a window's surface (e.g. when its flags change): KWin then sees a new window
+// with the same title. Let go of the old one and take the new one.
+workspace.windowRemoved.connect(function (w) {
+    if (w !== ctl) return;
+    ctl = null;
+    manual = false;
+    var now = workspace.windowList();
+    for (var k = 0; k < now.length; k++) adopt(now[k]);
+});
 for (var j = 0; j < all.length; j++) adopt(all[j]);
 """
 
