@@ -246,8 +246,18 @@ class Recording:
         from .livedraw import LiveOverlay
         self.overlay = LiveOverlay(QSize(self.rect[2], self.rect[3]))
         self.overlay.changed.connect(self._overlay_changed)
-        if hasattr(self.overlay, "drawing_changed"):
-            self.overlay.drawing_changed.connect(self._drawing_changed)
+        self.overlay.drawing_changed.connect(self._drawing_changed)
+        self.overlay.pen_changed.connect(self._sync_tools)
+        if self.controls:
+            t, o = self.controls.tools, self.overlay
+            t.tool_changed.connect(o.set_tool)
+            t.color_changed.connect(o.set_color)
+            t.width_step.connect(o.step_width)
+            t.undo.connect(o.undo)
+            t.clear.connect(o.clear)
+            t.emoji_chosen.connect(o.set_emoji)
+            t.keep_changed.connect(lambda keep: o.set_fade(0 if keep else (settings.get("rec.draw_fade") or 3.0)))
+            self._sync_tools()
         self.overlay.show()
         rect, target = self._area_for_kwin()
         self.kwin.place(self.overlay.TITLE, rect, target, mode="exact", pinned=True)
@@ -256,11 +266,17 @@ class Recording:
     def set_drawing(self, on):
         if self._ended:
             return
+        log(f"drawing {'on' if on else 'off'} ({'blended into the window stream' if self.sel.win else 'on screen, region stream'})")
         self._ensure_overlay().set_drawing(on)
         if self.controls:
             self.controls.set_drawing(on)
         if not on and self.sel.win:  # typing should go back to the recorded window
             self.kwin.activate(self.sel.win["id"])
+
+    def _sync_tools(self):
+        o = self.overlay
+        if self.controls and o:
+            self.controls.tools.set_state(o.tool, o.color, o.width_, o.fade <= 0, o.emoji)
 
     def toggle_drawing(self):
         on = not (self.overlay and getattr(self.overlay, "drawing", False))
@@ -317,9 +333,16 @@ class Recording:
     def _push_overlay(self):
         self._push_pending = False
         if not (self.rec and self.overlay and self.rec.size):
+            if self.overlay and self.overlay.strokes and not getattr(self, "_logged_skip", False):
+                self._logged_skip = True
+                log(f"drawing not blended: rec={bool(self.rec)} size={self.rec.size if self.rec else None}")
             return False
         w, h = self.rec.size
         layer = self.overlay.render_layer(w, h)
+        if layer is not None and not getattr(self, "_logged_layer", False):
+            self._logged_layer = True
+            log(f"drawing layer {layer[0].width()}x{layer[0].height()} at {layer[1:]} → video {w}x{h}"
+                if isinstance(layer, tuple) else "drawing layer rendered")
         if isinstance(layer, tuple):
             self.rec.set_overlay(*layer)
         else:

@@ -22,7 +22,7 @@ SHIFT = Qt.KeyboardModifier.ShiftModifier
 CTRL = Qt.KeyboardModifier.ControlModifier
 ALT = Qt.KeyboardModifier.AltModifier
 
-LIMITS = {"width": (1, 40), "font_size": (8, 160), "zoom": (2, 6)}
+LIMITS = {"width": (1, 40), "font_size": (8, 160), "zoom": (2, 6), "stamp": (16, 600)}
 
 _CURSORS = {"tl": Qt.CursorShape.SizeFDiagCursor, "br": Qt.CursorShape.SizeFDiagCursor,
             "tr": Qt.CursorShape.SizeBDiagCursor, "bl": Qt.CursorShape.SizeBDiagCursor,
@@ -56,6 +56,8 @@ class Props:
         self.text_bg = bool(get("annot.text_bg", False))
         self.fill = bool(get("annot.fill", False))
         self.zoom = int(get("annot.zoom", 2) or 2)
+        self.emoji = get("annot.emoji") or "😂"
+        self.stamp = int(get("annot.stamp", 64) or 64)
         self.tool_colors = dict(self.TOOL_COLORS, **(get("annot.tool_colors", {}) or {}))
         self.last_tool = get("annot.tool", "arrow") or "arrow"
 
@@ -64,7 +66,8 @@ class Props:
 
     def values(self, tool):
         return {"color": self.color_for(tool), "width": self.width, "font_size": self.font_size,
-                "font": self.font, "text_bg": self.text_bg, "fill": self.fill, "zoom": self.zoom}
+                "font": self.font, "text_bg": self.text_bg, "fill": self.fill, "zoom": self.zoom,
+                "emoji": self.emoji, "stamp": self.stamp}
 
     def set(self, tool, name, value):
         if name == "color" and tool in self.TOOL_COLORS:
@@ -195,7 +198,9 @@ class Canvas(QObject):
     def bump(self, steps):
         """Mouse wheel: change the width (or font size) of the tool / selected shape."""
         props, values = self.active_props()
-        if "width" in props:
+        if "stamp" in props:
+            self.set_prop("stamp", values["stamp"] + 8 * steps)
+        elif "width" in props:
             self.set_prop("width", values["width"] + steps)
         elif "font_size" in props:
             self.set_prop("font_size", values["font_size"] + 2 * steps)
@@ -560,7 +565,8 @@ class Canvas(QObject):
                 self.doc.cancel()
             else:
                 self.doc.commit()
-                self.select(s)
+                if s.kind != "emoji":   # picking the next emoji must not swap the one just placed
+                    self.select(s)
         elif kind == "crop-new" and not op[2]:
             hits = [r for r in self.snap_rects if r.contains(pt)] if self.inplace else []
             if hits:

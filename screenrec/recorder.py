@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 
 import gi
 
@@ -98,10 +99,12 @@ class Recorder:
         desc = [
             f"pipewiresrc name=src path={node} do-timestamp=true"
             f" keepalive-time=1000 provide-clock=false always-copy=true"
-            f" ! capsfilter caps=video/x-raw ! videocrop name=crop{rate}"
-            # live drawings / click ripples blended in (window streams don't contain our overlay)
+            " ! capsfilter caps=video/x-raw"
+            # live drawings / click ripples blended in (window streams don't contain our overlay).
+            # Before the crop, in full-frame coordinates: videocrop may only attach crop metadata
+            # instead of cutting, and the overlay would then ignore the crop offset.
             + (" ! gdkpixbufoverlay name=ov" if overlay else "")
-            + " ! queue max-size-buffers=8 leaky=downstream"
+            + f" ! videocrop name=crop{rate} ! queue max-size-buffers=8 leaky=downstream"
         ]
         enc = _encoder_desc(codec, quality, qp, rect[2] * rect[3] * scale * scale)
         if codec == "av1-sw":
@@ -173,6 +176,7 @@ class Recorder:
         pw, ph = min(pw, W), min(ph, H)   # window shrank below the area: can't keep the size
         px = min(max(px, 0), W - pw)
         py = min(max(py, 0), H - ph)
+        self._crop_origin = (px, py)   # where the kept area starts in the full frame (for the overlay)
         for prop, val in (("left", px), ("top", py), ("right", W - px - pw), ("bottom", H - py - ph)):
             self.crop.set_property(prop, val)
 
@@ -215,6 +219,12 @@ class Recorder:
                 self.ov.set_property("alpha", 0.0)
             else:
                 pb, x, y = upd
+                ox, oy = getattr(self, "_crop_origin", (0, 0))
+                x, y = x + ox, y + oy
+                if not getattr(self, "_ov_logged", False):
+                    self._ov_logged = True
+                    from .app_util import log
+                    log(f"drawing blended into the video ({pb.get_width()}x{pb.get_height()} at {x},{y})")
                 self.ov.set_property("pixbuf", pb)
                 self.ov.set_property("offset-x", x)
                 self.ov.set_property("offset-y", y)

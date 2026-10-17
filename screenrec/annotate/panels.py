@@ -162,6 +162,11 @@ class PropsPanel(Panel):
                                    slot=lambda on: self.changed.emit("text_bg", on))
         self.groups["text_bg"] = [self.text_bg]
         self.groups["zoom"] = self._stepper("zoom", "Zoom", 1)
+        from ..emoji import button_font
+        self.emoji = self.button(None, "<b>Emoji</b> — pick the stamp", text="😂", slot=self._pick_emoji)
+        self.emoji.setFont(button_font(18))
+        self.groups["emoji"] = [self.emoji]
+        self.groups["stamp"] = self._stepper("stamp", "Size", 8)
         self._values = {}
 
     def _stepper(self, name, tip, step):
@@ -179,6 +184,12 @@ class PropsPanel(Panel):
     def _step(self, name, d):
         if name in self._values:
             self.changed.emit(name, self._values[name] + d)
+
+    def _pick_emoji(self):
+        from ..emoji import Picker
+        picker = Picker(self, "Click on the screenshot to place it")
+        picker.chosen.connect(lambda e: self.changed.emit("emoji", e))
+        picker.open_at(self.emoji)
 
     def _pick(self):
         c = QColorDialog.getColor(QColor(self._color), self.window(), "Annotation colour")
@@ -210,6 +221,10 @@ class PropsPanel(Panel):
             self._font_size_label.setText(str(values["font_size"]))
         if "zoom" in props:
             self._zoom_label.setText(f"{values['zoom']}×")
+        if "emoji" in props:
+            self.emoji.setText(values["emoji"])
+        if "stamp" in props:
+            self._stamp_label.setText(f"{int(values['stamp'])} px")
         self.fill.setChecked(bool(values.get("fill")))
         self.text_bg.setChecked(bool(values.get("text_bg")))
         return bool(props)

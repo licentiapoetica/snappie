@@ -6,8 +6,22 @@ import sys
 import dbus
 
 
+LOG_FILE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+                        "screenrec", "screenrec.log")
+
+
 def log(*a):
+    """To stderr and to LOG_FILE (kept small), so problems can be looked at afterwards."""
     print("screenrec:", *a, file=sys.stderr, flush=True)
+    try:
+        import time
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > 1_000_000:
+            os.replace(LOG_FILE, LOG_FILE + ".1")
+        with open(LOG_FILE, "a") as f:
+            f.write(time.strftime("%H:%M:%S ") + f"[{os.getpid()}] " + " ".join(str(x) for x in a) + "\n")
+    except OSError:
+        pass
 
 
 # -- notifications --

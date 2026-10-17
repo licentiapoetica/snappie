@@ -521,6 +521,22 @@ class EditorWindow(QMainWindow):
         self.zoom_spin = QSpinBox(minimum=2, maximum=6, suffix="×")
         self.zoom_spin.valueChanged.connect(lambda v: self.canvas.set_prop("zoom", v))
         add("zoom", QLabel(" Zoom "), self.zoom_spin)
+        from PyQt6.QtWidgets import QToolButton
+        from ..emoji import Picker, button_font
+        self.emoji_btn = QToolButton()
+        self.emoji_btn.setText("😂")
+        self.emoji_btn.setFont(button_font(18))
+        self.emoji_btn.setToolTip("Pick the emoji to stamp")
+
+        def pick_emoji():
+            picker = Picker(self.emoji_btn, "Click on the image to place it")
+            picker.chosen.connect(lambda e: self.canvas.set_prop("emoji", e))
+            picker.open_at(self.emoji_btn)
+        self.emoji_btn.clicked.connect(pick_emoji)
+        add("emoji", QLabel(" Emoji "), self.emoji_btn)
+        self.stamp_spin = QSpinBox(minimum=16, maximum=600, singleStep=8, suffix=" px")
+        self.stamp_spin.valueChanged.connect(lambda v: self.canvas.set_prop("stamp", v))
+        add("stamp", QLabel(" Size "), self.stamp_spin)
         self.props_hint = QLabel()
         self.props_hint.setContentsMargins(8, 0, 8, 0)
         self.props_hint.setEnabled(False)
@@ -594,7 +610,8 @@ class EditorWindow(QMainWindow):
         for name, acts in self.prop_acts.items():
             for a in acts:
                 a.setVisible(name in props)
-        widgets = (self.width_spin, self.fill_box, self.size_spin, self.bg_box, self.zoom_spin, self.font_box)
+        widgets = (self.width_spin, self.fill_box, self.size_spin, self.bg_box, self.zoom_spin, self.font_box,
+                   self.stamp_spin)
         for w in widgets:
             w.blockSignals(True)
         kind = self.canvas.active_kind()
@@ -612,6 +629,10 @@ class EditorWindow(QMainWindow):
             self.bg_box.setChecked(bool(values["text_bg"]))
         if "zoom" in props:
             self.zoom_spin.setValue(int(values["zoom"]))
+        if "emoji" in props:
+            self.emoji_btn.setText(values["emoji"])
+        if "stamp" in props:
+            self.stamp_spin.setValue(int(values["stamp"]))
         if "font" in props:
             from PyQt6.QtGui import QFont
             self.font_box.setCurrentFont(QFont(values["font"]) if values["font"] else QFont())

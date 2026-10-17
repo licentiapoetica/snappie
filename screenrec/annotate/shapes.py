@@ -837,8 +837,59 @@ class Magnifier(Shape):
         p.drawEllipse(QRectF(x0 / d, y0 / d, D / d, D / d))
 
 
+# ---------------------------------------------------------------- emoji stamps
+
+class Emoji(Shape):
+    """An emoji stamp: placed with a click (drag while placing, or the corner handles, to resize)."""
+    kind = "emoji"
+    props = ("emoji", "stamp")
+
+    def __init__(self, x, y, emoji="😂", stamp=64):
+        super().__init__("#000000", 0)
+        self.cx, self.cy = x, y
+        self.emoji = emoji
+        self.stamp = stamp           # size in logical px
+
+    def rect(self):
+        h = self.stamp / 2
+        return QRectF(self.cx - h, self.cy - h, self.stamp, self.stamp)
+
+    def bounds(self):
+        return self.rect().adjusted(-2, -2, 2, 2)
+
+    def hit(self, pt, tol):
+        return "body" if self.rect().adjusted(-tol, -tol, tol, tol).contains(pt) else None
+
+    def handles(self):
+        r = self.rect()
+        return [("tl", r.topLeft()), ("tr", r.topRight()), ("br", r.bottomRight()), ("bl", r.bottomLeft())]
+
+    def drag_handle(self, key, pt, shift):
+        # stays centred: the size follows the handle's distance from the middle
+        d = max(abs(pt.x() - self.cx), abs(pt.y() - self.cy))
+        self.stamp = max(16.0, min(600.0, 2 * d))
+
+    def drag_create(self, start, pt, shift):
+        d = max(abs(pt.x() - start.x()), abs(pt.y() - start.y()))
+        if d * 2 > 16:
+            self.stamp = min(600.0, 2 * d)
+
+    def translate(self, dx, dy):
+        self.cx += dx
+        self.cy += dy
+
+    def paint(self, p, ctx):
+        from ..emoji import image
+        r = self.rect()
+        img = image(self.emoji, int(math.ceil(r.width() * ctx.dpr)))
+        p.save()
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        p.drawImage(r, img)
+        p.restore()
+
+
 KINDS = {c.kind: c for c in (Line, Arrow, Rect, Ellipse, Marker, Redact, Blur, Pixelate, Pen, Highlighter,
-                            Text, Step, Magnifier)}
+                            Text, Step, Magnifier, Emoji)}
 
 
 def make(tool, pt, values):

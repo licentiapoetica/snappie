@@ -28,6 +28,7 @@ TOOLS = [
     ("pixelate", "Pixelate", "X", "pixelate", "Drag over the area to pixelate."),
     ("redact", "Redact", "D", "", "Drag a solid box over the area to hide."),
     ("step", "Step number", "N", "draw-number", "Click to place the next number; drag from it to add a pointer."),
+    ("emoji", "Emoji", "J", "face-smile", "Click to place the emoji (pick it in the bar); drag while placing to size it."),
     ("magnifier", "Magnifier", "G", "zoom-in", "Drag from the spot to magnify to where the lens should go."),
     ("crop", "Crop", "C", "transform-crop", "Drag the edges, or draw a new area. Enter: done."),
 ]
@@ -137,6 +138,17 @@ def _draw(p, name, c):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(c)
         p.drawPath(num.translated(12 - br.center().x(), 12 - br.center().y()))
+    elif name == "emoji":
+        p.drawEllipse(QPointF(12, 12), 8.5, 8.5)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(c)
+        p.drawEllipse(QPointF(9, 10), 1.3, 1.6)
+        p.drawEllipse(QPointF(15, 10), 1.3, 1.6)
+        p.setPen(_pen(c, 1.6))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        smile = QPainterPath(QPointF(8, 13.5))
+        smile.quadTo(QPointF(12, 18), QPointF(16, 13.5))
+        p.drawPath(smile)
     elif name == "magnifier":
         p.drawEllipse(QPointF(10, 10), 6, 6)
         p.setPen(_pen(c, 2.8))

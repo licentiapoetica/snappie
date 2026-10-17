@@ -1,10 +1,10 @@
 """Small floating recording bar (timer, pause, draw, stop). KWin places it, see kwin.place."""
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+from PyQt6.QtWidgets import QButtonGroup, QColorDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
-from .style import RECORD
+from .style import ACCENT_TEXT, MUTED, PALETTE, RECORD, TEXT
 
 TITLE = "screenrec — recording"
 
@@ -33,6 +33,195 @@ class _Dot(QWidget):
             return
         p.setBrush(RECORD if self.on else QColor(218, 68, 83, 70))
         p.drawEllipse(1, 1, 10, 10)
+
+
+def _tool_icon(kind, color):
+    """Small line-art icon for a drawing tool, in one color (white normally, dark when active)."""
+    pm = QPixmap(36, 36)
+    pm.setDevicePixelRatio(2)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(color, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    if kind == "pen":
+        path = QPainterPath(QPointF(3, 13))
+        path.cubicTo(QPointF(6, 3), QPointF(9, 17), QPointF(15, 5))
+        p.drawPath(path)
+    elif kind == "highlighter":
+        c = QColor(color)
+        c.setAlphaF(0.55)
+        p.setPen(QPen(c, 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
+        p.drawLine(QPointF(3, 9), QPointF(15, 9))
+    elif kind == "arrow":
+        p.drawLine(QPointF(3, 15), QPointF(12, 6))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawPolygon(QPolygonF([QPointF(15.5, 2.5), QPointF(8, 4.5), QPointF(13.5, 10)]))
+    elif kind == "line":
+        p.drawLine(QPointF(3, 15), QPointF(15, 3))
+    elif kind == "rect":
+        p.drawRect(QRectF(3, 4.5, 12, 9))
+    elif kind == "ellipse":
+        p.drawEllipse(QRectF(2.5, 4, 13, 10))
+    p.end()
+    return pm
+
+
+def _sep():
+    f = QFrame()
+    f.setFixedSize(1, 18)
+    f.setStyleSheet("background: rgba(255,255,255,45);")
+    return f
+
+
+class DrawTools(QWidget):
+    """Tool, color, size, keep / undo / clear for drawing on the recording. Lives in the bar
+    (outside the recorded area, so it never shows up in the video)."""
+    tool_changed = pyqtSignal(str)
+    color_changed = pyqtSignal(QColor)
+    width_step = pyqtSignal(int)
+    keep_changed = pyqtSignal(bool)
+    emoji_chosen = pyqtSignal(str)
+    undo = pyqtSignal()
+    clear = pyqtSignal()
+
+    TOOLS = [("pen", "Pen  (P)"), ("highlighter", "Highlighter  (H)"), ("arrow", "Arrow  (A, or Shift / right drag)"),
+             ("line", "Line  (L)"), ("rect", "Rectangle  (R)"), ("ellipse", "Ellipse  (E)")]
+
+    def __init__(self):
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        lay.addWidget(_sep())
+        lay.addSpacing(4)
+        self.tools = QButtonGroup(self)
+        self.tools.setExclusive(True)
+        self._tool_btn = {}
+        for kind, tip in self.TOOLS:
+            b = self._button(tip, checkable=True)
+            ic = QIcon()
+            ic.addPixmap(_tool_icon(kind, TEXT), QIcon.Mode.Normal, QIcon.State.Off)
+            ic.addPixmap(_tool_icon(kind, ACCENT_TEXT), QIcon.Mode.Normal, QIcon.State.On)
+            b.setIcon(ic)
+            b.setIconSize(QSize(18, 18))
+            b.clicked.connect(lambda _=False, k=kind: self.tool_changed.emit(k))
+            self.tools.addButton(b)
+            self._tool_btn[kind] = b
+            lay.addWidget(b)
+        self.emoji = self._button("Emoji stamp: pick one, then click to place it (it fades out)",
+                                  text="😂", checkable=True)
+        from .emoji import button_font
+        self.emoji.setFont(button_font(16))
+        self.emoji.clicked.connect(self._open_emojis)
+        self.tools.addButton(self.emoji)
+        self._tool_btn["emoji"] = self.emoji
+        lay.addWidget(self.emoji)
+        lay.addSpacing(4)
+        lay.addWidget(_sep())
+        lay.addSpacing(6)
+        self._swatches = []
+        for i, c in enumerate(PALETTE):
+            sw = QPushButton()
+            sw.setFixedSize(18, 18)
+            sw.setCheckable(True)
+            sw.setToolTip(f"{c}  ({i + 1})")
+            sw.setCursor(Qt.CursorShape.PointingHandCursor)
+            sw.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            sw.setStyleSheet(self._swatch_qss(c))
+            sw.clicked.connect(lambda _=False, col=c: self.color_changed.emit(QColor(col)))
+            self._swatches.append((c, sw))
+            lay.addWidget(sw)
+        self.custom = self._button("Other color…", text="…")
+        self.custom.clicked.connect(self._pick_color)
+        lay.addWidget(self.custom)
+        lay.addSpacing(4)
+        lay.addWidget(_sep())
+        lay.addSpacing(2)
+        minus = self._button("Thinner  (wheel down / −)", text="−")
+        minus.clicked.connect(lambda: self.width_step.emit(-1))
+        self.size = QLabel("4 px")
+        self.size.setStyleSheet("color: #eff0f1;")
+        self.size.setToolTip("Size — scroll here or on the drawing to change it")
+        f = self.size.font()
+        f.setFeature(QFont.Tag("tnum"), 1)
+        self.size.setFont(f)
+        self.size.setMinimumWidth(self.size.fontMetrics().horizontalAdvance("24 px") + 4)
+        self.size.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        plus = self._button("Thicker  (wheel up / +)", text="+")
+        plus.clicked.connect(lambda: self.width_step.emit(1))
+        lay.addWidget(minus)
+        lay.addWidget(self.size)
+        lay.addWidget(plus)
+        lay.addSpacing(2)
+        lay.addWidget(_sep())
+        lay.addSpacing(2)
+        self.keep = self._button("Keep drawings (otherwise they fade out after a few seconds)",
+                                 text="Keep", checkable=True)
+        self.keep.toggled.connect(self.keep_changed)
+        undo = self._button("Undo  (Z)", text="↶")
+        undo.clicked.connect(self.undo)
+        clear = self._button("Clear all  (C)", text="Clear")
+        clear.clicked.connect(self.clear)
+        lay.addWidget(self.keep)
+        lay.addWidget(undo)
+        lay.addWidget(clear)
+        self._color = QColor(PALETTE[0])
+        self._tool = "pen"
+
+    def _button(self, tip, text="", checkable=False):
+        b = QPushButton(text)
+        b.setToolTip(tip)
+        b.setCheckable(checkable)
+        b.setStyleSheet(_BTN.replace("padding: 4px 9px", "padding: 4px 6px"))
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        return b
+
+    @staticmethod
+    def _swatch_qss(c):
+        return (f"QPushButton {{ background: {c}; border: 1px solid rgba(255,255,255,60); border-radius: 0; }}"
+                f"QPushButton:hover {{ border: 1px solid #eff0f1; }}"
+                f"QPushButton:checked {{ border: 2px solid #eff0f1; }}")
+
+    def _open_emojis(self):
+        # keep the button showing the current tool until an emoji is actually chosen
+        self._tool_btn.get(self._tool, self.emoji).setChecked(True)
+        from .emoji import Picker
+        picker = Picker(self, "Click on the recording to place it · it fades out by itself")
+        picker.chosen.connect(self.emoji_chosen)
+        picker.open_at(self.emoji)
+
+    def _pick_color(self):
+        c = QColorDialog.getColor(self._color, self.window(), "Drawing color")
+        if c.isValid():
+            self.color_changed.emit(c)
+
+    def wheelEvent(self, ev):
+        d = ev.angleDelta().y()
+        if d:
+            self.width_step.emit(1 if d > 0 else -1)
+
+    def set_state(self, tool, color, width, keep, emoji=None):
+        """Show the overlay's current pen without emitting anything."""
+        self._tool = tool
+        if emoji:
+            self.emoji.setText(emoji)
+        b = self._tool_btn.get(tool)
+        if b:
+            b.setChecked(True)
+        self._color = QColor(color)
+        name = self._color.name().lower()
+        for c, sw in self._swatches:
+            sw.setChecked(c.lower() == name)
+        custom = all(c.lower() != name for c, _ in self._swatches)
+        self.custom.setStyleSheet(_BTN.replace("padding: 4px 9px", "padding: 4px 6px") +
+                                  (f"QPushButton {{ border-bottom: 3px solid {name}; }}" if custom else ""))
+        self.size.setText(f"{int(width)} px")
+        self.keep.blockSignals(True)
+        self.keep.setChecked(bool(keep))
+        self.keep.blockSignals(False)
 
 
 class Controls(QWidget):
@@ -88,6 +277,10 @@ class Controls(QWidget):
         lay.addSpacing(4)
         lay.addWidget(self.pause)
         lay.addWidget(self.draw)
+        self.tools = DrawTools()
+        self.tools.hide()
+        lay.addWidget(self.tools)
+        lay.addSpacing(4)
         lay.addWidget(self.stop)
         self._blink = QTimer(self, interval=600, timeout=self._toggle_dot)
         self._blink.start()
@@ -117,6 +310,9 @@ class Controls(QWidget):
         self.draw.blockSignals(True)
         self.draw.setChecked(on)
         self.draw.blockSignals(False)
+        self.tools.setVisible(on)
+        self.adjustSize()
+        self.setFixedSize(self.sizeHint())
 
     def set_busy(self, busy):
         """While a segment is being finished/started (pause, resume): no double clicks."""
@@ -126,6 +322,7 @@ class Controls(QWidget):
         self.stop.setEnabled(False)
         self.pause.setEnabled(False)
         self.draw.setEnabled(False)
+        self.tools.setEnabled(False)
         self.stop.setText("…")
         self._blink.stop()
         self.stop_clicked.emit()

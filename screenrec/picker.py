@@ -8,7 +8,7 @@ levels and can be clicked.
 
 import threading
 
-from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QRegion
 from PyQt6.QtWidgets import QWidget
 
@@ -25,6 +25,8 @@ MODES = {
 WINDOW_STYLES = ["plain", "transparent", "shadow"]
 LOUPE_PX = 15        # source pixels across the magnifier
 LOUPE_ZOOM = 9
+LOUPE_REACH = 330    # the loupe always fits within this many px of the cursor (repaint area)
+REFRESH_MS = 40      # area highlight follows the mouse at most this often (it may query AT-SPI)
 
 # AT-SPI roles that are usually anonymous layout containers
 GENERIC_ROLES = {"panel", "filler", "unknown", "section", "layered pane", "split pane", "grouping",
@@ -111,7 +113,8 @@ class Picker(QObject):
         self._busy = None
         self._cond = threading.Condition()
         self._segmented.connect(self._on_segmented)
-        self._timer = QTimer(self, singleShot=True, interval=16, timeout=self._refresh)
+        self._timer = QTimer(self, singleShot=True, interval=REFRESH_MS, timeout=self._refresh)
+        self._shown = None      # what the overlays currently show (skip repaints when unchanged)
         self.overlays = [Overlay(self, s) for s in QGuiApplication.screens()]
         # capture + analyse windows in the background so areas are ready on hover
         for w in self.windows[:MAX_PREFETCH]:
@@ -240,7 +243,10 @@ class Picker(QObject):
             self.level = self._level_by_key.get(key, 1 if w else 0)
         self.levels = levels
         self.level = max(0, min(self.level, len(levels) - 1))
-        self._update()
+        shown = (key, self.level, self.status, tuple((lv.kind, lv.rect.getRect()) for lv in levels))
+        if shown != self._shown:      # same highlight as before: the loupe already repainted itself
+            self._shown = shown
+            self._update()
 
     def current(self):
         if self.drag is not None:
@@ -256,17 +262,30 @@ class Picker(QObject):
     # -- input (called by overlays, global coordinates) --
 
     def mouse_move(self, p):
-        self.cursor = p
+        prev, self.cursor = self.cursor, p
         self.crumb_hover = None
+        if prev is None or self._screen_at(prev) is not self._screen_at(p):
+            self._update()                   # hint bar / crumbs move to the other screen
+        elif self.magnifier and self.backgrounds:
+            self._update_loupe(prev, p)      # every move: the loupe must follow the mouse
         if self.mode == "color":
-            self._update()
             return
         if self.press is not None and (self.drag is not None or (p - self.press).manhattanLength() > 6):
             bounds = self._screen_at(self.press).geometry()
             self.drag = QRect(self.press, p).normalized().intersected(bounds)
             self._update()
-        else:
+        elif not self._timer.isActive():
+            # throttle, don't debounce: a 1000 Hz mouse would otherwise keep postponing it
             self._timer.start()
+
+    def _update_loupe(self, *points):
+        """Repaint only around the old and new cursor position."""
+        r = LOUPE_REACH
+        for o in self.overlays:
+            g = o.scr.geometry()
+            for pt in points:
+                if pt is not None and g.contains(pt):
+                    o.update(QRect(pt - g.topLeft() - QPoint(r, r), QSize(2 * r, 2 * r)))
 
     def hover_crumb(self, i):
         if i != self.crumb_hover:

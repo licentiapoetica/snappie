@@ -34,6 +34,9 @@ KEYS_HOLD = 1.5     # s without typing before the key bubble fades
 CHIP_HOLD = 2.5     # s the hint chip stays after turning drawing on / changing the pen
 FRAME_MS = 16       # ~60 fps while something animates
 
+EMOJI_POP = 0.22    # s, pop-in of an emoji stamp
+EMOJI_HOLD = 1.6    # s from placing a stamp until it starts to fade (and float up)
+
 RIPPLE_COLORS = {1: style.ACCENT, 2: QColor("#27ae60"), 3: style.WARN}
 WIDTHS = (2, 3, 4, 6, 8, 12, 16, 24)
 
@@ -43,8 +46,31 @@ def _fade(now, start):
     return 1.0 if now <= start else max(0.0, 1.0 - (now - start) / FADE)
 
 
+TOOLS = ("pen", "highlighter", "arrow", "line", "rect", "ellipse", "emoji")
+TOOL_NAMES = {"pen": "Pen", "highlighter": "Highlighter", "arrow": "Arrow", "line": "Line",
+              "rect": "Rectangle", "ellipse": "Ellipse", "emoji": "Emoji"}
+
+
+def emoji_size(width):
+    """Stamp size (logical px) for the pen width setting: 4 → 44, 8 → 64, 24 → 144."""
+    return 24 + 5 * int(width)
+
+
+def emoji_image(emoji):
+    from .emoji import image
+    return image(emoji, 160)
+
+
+def _ease_out_back(t):
+    c = 1.9
+    t -= 1
+    return 1 + (c + 1) * t ** 3 + c * t ** 2
+FREEHAND = ("pen", "highlighter")
+TOOL_KEYS = {"p": "pen", "h": "highlighter", "a": "arrow", "l": "line", "r": "rect", "e": "ellipse"}
+
+
 class _Stroke:
-    """One drawn shape in area-logical coordinates.  kind: pen | arrow | rect."""
+    """One drawn shape in area-logical coordinates.  kind: one of TOOLS."""
 
     _serials = itertools.count()
 
@@ -56,7 +82,7 @@ class _Stroke:
         self._path = None
 
     def add(self, p):
-        if self.kind == "pen":
+        if self.kind in FREEHAND:
             last = self.pts[-1]
             if abs(p.x() - last.x()) + abs(p.y() - last.y()) < 1.5:
                 return False
@@ -67,7 +93,7 @@ class _Stroke:
         return True
 
     def tiny(self):
-        if self.kind == "pen":
+        if self.kind in FREEHAND:
             return False            # a click is a dot
         if len(self.pts) < 2:
             return True
@@ -88,9 +114,12 @@ class _Stroke:
     def head(self):
         return max(10.0, self.width * 3.2)
 
+    def pen_width(self):
+        return self.width * 3 if self.kind == "highlighter" else self.width
+
     def bounds(self):
-        m = self.width / 2 + 2
-        if self.kind == "pen":
+        m = self.pen_width() / 2 + 2
+        if self.kind in FREEHAND:
             r = self.path().controlPointRect()
         else:
             r = QRectF(self.pts[0], self.pts[-1]).normalized()
@@ -99,16 +128,24 @@ class _Stroke:
         return r.adjusted(-m, -m, m, m)
 
     def paint(self, p):
-        pen = QPen(self.color, self.width)
-        if self.kind == "rect":
+        color = QColor(self.color)
+        if self.kind == "highlighter":   # see-through marker; one path, so overlaps don't darken
+            color.setAlphaF(color.alphaF() * 0.4)
+        pen = QPen(color, self.pen_width())
+        if self.kind in ("rect", "ellipse"):
             pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(QRectF(self.pts[0], self.pts[-1]).normalized())
+            r = QRectF(self.pts[0], self.pts[-1]).normalized()
+            p.drawRect(r) if self.kind == "rect" else p.drawEllipse(r)
             return
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        if self.kind == "pen":
+        if self.kind == "line":
+            p.setPen(pen)
+            p.drawLine(self.pts[0], self.pts[-1])
+            return
+        if self.kind in FREEHAND:
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
             if len(self.pts) == 1:
@@ -135,9 +172,9 @@ class LiveOverlay(QWidget):
     """Transparent window over the recorded area: live pen, click ripples, key bubble.
 
     Drawing off: click-through, takes no focus, only shows ripples / keys / fading strokes.
-    Drawing on:  left drag = pen (or rectangle, R), Shift+drag or right drag = straight arrow,
-                 wheel or +/- = width, 1-8 = colour, A = arrow tool, Z = undo, C = clear,
-                 Esc = drawing off.
+    Drawing on:  left drag = current tool, Shift+drag or right drag = straight arrow,
+                 P pen, H highlighter, A arrow, L line, R rectangle, E ellipse,
+                 wheel or +/- = width, 1-8 = colour, Z = undo, C = clear, Esc = drawing off.
     """
 
     TITLE = TITLE
@@ -145,6 +182,7 @@ class LiveOverlay(QWidget):
 
     changed = pyqtSignal()               # something visible in render_layer changed
     drawing_changed = pyqtSignal(bool)   # drawing toggled from here (Esc)
+    pen_changed = pyqtSignal()           # tool, colour or width changed (keys, wheel or setters)
     remapped = pyqtSignal()              # window was re-created (only with REMAP_ON_TOGGLE)
 
     def __init__(self, size: QSize, parent=None):
@@ -160,10 +198,13 @@ class LiveOverlay(QWidget):
         self.resize(size)
 
         self.fade = float(settings.get("rec.draw_fade") or 0)   # 0 = strokes stay until cleared
-        color = settings.get("annot.color")
+        color = settings.get("rec.draw_color") or settings.get("annot.color")
         self.color = QColor(color if QColor.isValidColorName(color or "") else style.PALETTE[0])
-        self.width_ = int(settings.get("annot.width") or 4)
-        self.tool = "pen"                     # pen | rect | arrow
+        self.width_ = int(settings.get("rec.draw_width") or settings.get("annot.width") or 4)
+        tool = settings.get("rec.draw_tool")
+        self.tool = tool if tool in TOOLS else "pen"
+        self.emoji = settings.get("rec.emoji") or "😂"
+        self.stamps = []                      # [emoji, x, y, size, t0]
         self._drawing = False
         self.strokes = []
         self._cur = None                      # stroke being drawn
@@ -194,7 +235,7 @@ class LiveOverlay(QWidget):
         if on:
             self.setCursor(Qt.CursorShape.CrossCursor)
             self.activateWindow()             # needed for the 1-8 / R / Z / Esc keys
-            self._show_chip(self._pen_text() + "   1-8 colour · R rect · A arrow · Z undo · C clear · Esc")
+            self._show_chip(self._pen_text() + "   P H A L R E tools · 1-8 colour · Z undo · C clear · Esc")
         else:
             self.unsetCursor()
             self._chip = None
@@ -229,12 +270,63 @@ class LiveOverlay(QWidget):
         self._bubble_cache = None
         self._changed()
 
+    def set_tool(self, tool):
+        if tool in TOOLS and tool != self.tool:
+            self.tool = tool
+            self._pen_updated()
+
+    def set_emoji(self, emoji):
+        """Choose the emoji (and the emoji tool): each click stamps it, it then fades away."""
+        self.emoji = emoji
+        settings.set("rec.emoji", emoji)
+        if self.tool != "emoji":
+            self.tool = "emoji"
+            self._pen_updated()
+        else:
+            self._show_chip(self._pen_text()) if self._drawing else None
+            self.pen_changed.emit()
+
+    def set_color(self, color):
+        color = QColor(color)
+        if color.isValid() and color != self.color:
+            self.color = color
+            self._pen_updated()
+
+    def set_width(self, width):
+        width = max(1, min(64, int(width)))
+        if width != self.width_:
+            self.width_ = width
+            self._pen_updated()
+
+    def set_fade(self, seconds):
+        """0 = drawings stay until cleared. Turning fading on starts the clock now for what's there."""
+        seconds = max(0.0, float(seconds))
+        if seconds > 0 and self.fade <= 0:
+            now = time.monotonic()
+            for st in self.strokes:
+                if st.done is not None:
+                    st.done = now
+        self.fade = seconds
+        self._layer_cache = None
+        self._changed()
+
+    def step_width(self, step):
+        self._step_width(step)
+
+    def _pen_updated(self):
+        settings.save(**{"rec.draw_tool": self.tool, "rec.draw_color": self.color.name(),
+                         "rec.draw_width": self.width_})
+        if self._drawing:
+            self._show_chip(self._pen_text())
+        self.pen_changed.emit()
+
     def undo(self):
         if self.strokes:
             self.strokes.pop()
             self._changed()
 
     def clear(self):
+        self.stamps.clear()
         self.strokes.clear()
         self._cur = None
         self._changed()
@@ -340,6 +432,7 @@ class LiveOverlay(QWidget):
         if self.fade > 0:
             self.strokes = [s for s in self.strokes if s.done is None or now < s.done + self.fade + FADE]
         self.ripples = [r for r in self.ripples if now < r[3] + RIPPLE]
+        self.stamps = [st for st in self.stamps if now < st[4] + EMOJI_HOLD + FADE]
         if self._key_items and now >= self._key_last + KEYS_HOLD + FADE:
             self._key_items.clear()
             self._bubble_cache = None
@@ -356,7 +449,9 @@ class LiveOverlay(QWidget):
             starts.append(self._key_last + KEYS_HOLD)
         if self._chip:
             starts.append(self._chip[1] + CHIP_HOLD)
-        animating = bool(self.ripples) or any(t <= now for t in starts)
+        starts += [st[4] + EMOJI_HOLD for st in self.stamps]
+        popping = any(now < st[4] + EMOJI_POP for st in self.stamps)
+        animating = bool(self.ripples) or popping or any(t <= now for t in starts)
         if animating:
             self._wake.stop()
             if not self._frame.isActive():
@@ -379,6 +474,9 @@ class LiveOverlay(QWidget):
             box = box.united(QRectF(x - m, y - m, 2 * m, 2 * m))
         if self._key_items:
             box = box.united(self._bubble_layout()[0].adjusted(-1, -1, 1, 1))
+        for _, x, y, size, _ in self.stamps:
+            m = size * 0.65   # overshoot of the pop
+            box = box.united(QRectF(x - m, y - m - size * 0.4, 2 * m, 2 * m + size * 0.4))
         return None if box.isEmpty() else box
 
     def _paint_content(self, p, now, skip=()):
@@ -394,11 +492,27 @@ class LiveOverlay(QWidget):
             self._cur.paint(p)
         for x, y, color, t0 in self.ripples:
             self._paint_ripple(p, x, y, color, min(1.0, max(0.0, (now - t0) / RIPPLE)))
+        for st in self.stamps:
+            self._paint_stamp(p, now, *st)
         if self._key_items:
             a = _fade(now, self._key_last + KEYS_HOLD)
             if a > 0:
                 p.setOpacity(a)
                 self._paint_bubble(p)
+        p.setOpacity(1.0)
+
+    def _paint_stamp(self, p, now, emoji, x, y, size, t0):
+        """Pop in (with a little overshoot), hold, then float up while fading."""
+        pop = min(1.0, max(0.0, (now - t0) / EMOJI_POP))
+        scale = max(0.05, _ease_out_back(pop))
+        a = _fade(now, t0 + EMOJI_HOLD)
+        if a <= 0:
+            return
+        rise = (1 - a) * size * 0.35
+        s = size * scale
+        p.setOpacity(a)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.drawImage(QRectF(x - s / 2, y - s / 2 - rise, s, s), emoji_image(emoji))
         p.setOpacity(1.0)
 
     @staticmethod
@@ -497,7 +611,9 @@ class LiveOverlay(QWidget):
                 p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
 
     def _pen_text(self):
-        return {"pen": "Pen", "rect": "Rectangle", "arrow": "Arrow"}[self.tool] + f" · {self.width_} px"
+        if self.tool == "emoji":
+            return f"{self.emoji}  Emoji · click to place · {emoji_size(self.width_)} px"
+        return TOOL_NAMES[self.tool] + f" · {self.width_} px"
 
     def _show_chip(self, text):
         self._chip = (text, time.monotonic())
@@ -550,8 +666,13 @@ class LiveOverlay(QWidget):
             self._finish_stroke()
         shift = ev.modifiers() & Qt.KeyboardModifier.ShiftModifier
         kind = "arrow" if (b == Qt.MouseButton.RightButton or shift) else self.tool
+        if kind == "emoji":
+            p = ev.position()
+            self.stamps.append([self.emoji, p.x(), p.y(), emoji_size(self.width_), time.monotonic()])
+            self._changed()
+            return
         self._cur = _Stroke(kind, self.color, self.width_, ev.position())
-        if kind == "arrow" or kind == "rect":
+        if kind not in FREEHAND:
             self._cur.add(ev.position())
         self._changed()
 
@@ -580,8 +701,7 @@ class LiveOverlay(QWidget):
 
     def _step_width(self, step):
         i = min(range(len(WIDTHS)), key=lambda k: abs(WIDTHS[k] - self.width_))
-        self.width_ = WIDTHS[max(0, min(len(WIDTHS) - 1, i + step))]
-        self._show_chip(self._pen_text())
+        self.set_width(WIDTHS[max(0, min(len(WIDTHS) - 1, i + step))])
 
     def keyPressEvent(self, ev):
         if not self._drawing:
@@ -591,14 +711,9 @@ class LiveOverlay(QWidget):
             self.set_drawing(False)
             self.drawing_changed.emit(False)
         elif text and text in "12345678":
-            self.color = QColor(style.PALETTE[int(text) - 1])
-            self._show_chip(self._pen_text())
-        elif k == Qt.Key.Key_R:
-            self.tool = "pen" if self.tool == "rect" else "rect"
-            self._show_chip(self._pen_text())
-        elif k == Qt.Key.Key_A:
-            self.tool = "pen" if self.tool == "arrow" else "arrow"
-            self._show_chip(self._pen_text())
+            self.set_color(style.PALETTE[int(text) - 1])
+        elif text and text in TOOL_KEYS:
+            self.set_tool(TOOL_KEYS[text])
         elif k == Qt.Key.Key_Z:
             self.undo()
         elif k == Qt.Key.Key_C:

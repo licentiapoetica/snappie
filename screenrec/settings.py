@@ -44,6 +44,10 @@ DEFAULTS = {
     "rec.clicks": False,                  # click ripples in the recording
     "rec.keys": False,                    # pressed keys in the recording
     "rec.draw_fade": 3.0,                 # seconds before a live drawing fades out (0 = keep)
+    "rec.draw_tool": "pen",               # live drawing: last tool, color, width
+    "rec.draw_color": "",                 # "" = annot.color
+    "rec.draw_width": 0,                  # 0 = annot.width
+    "rec.emoji": "😂",                     # live drawing: emoji stamp
 
     # -- GIF / WebP --
     "gif.format": "gif",                  # gif | webp
@@ -65,6 +69,9 @@ DEFAULTS = {
     "annot.tool_colors": {},              # tools that keep their own color (highlighter, redact, …)
     "annot.zoom": 2,                      # magnifier tool zoom
     "annot.frame": None,                  # last used editor frame (beautify) options
+    "annot.emoji": "😂",                   # emoji stamp tool
+    "annot.stamp": 64,                    # its size (logical px)
+    "emoji.recent": [],                   # recently picked emojis (recordings and screenshots)
 
     # -- remembered between captures --
     "last.selection": None,               # see app.remember_selection
