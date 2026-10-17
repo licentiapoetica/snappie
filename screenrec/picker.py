@@ -8,18 +8,23 @@ levels and can be clicked.
 
 import threading
 
-from PyQt6.QtCore import QObject, QPoint, QRect, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QRegion
 from PyQt6.QtWidgets import QWidget
 
-ACCENT = QColor("#3daee9")
-DIM = QColor(0, 0, 0, 120)
-PANEL_BG = QColor(0, 0, 0)
-CHIP_BG = QColor(255, 255, 255, 18)
-CHIP_HOVER = QColor(255, 255, 255, 40)
-TEXT = QColor("#eff0f1")
-MUTED = QColor("#9aa0a6")
-WARN = QColor("#f67400")
+from .style import ACCENT, ACCENT_TEXT, CHIP_BG, CHIP_HOVER, DIM, MUTED, PANEL_BG, TEXT, WARN
+
+# what the picker is for: changes the hints, toggles and what a click returns
+MODES = {
+    "record": "record",
+    "shot": "capture",
+    "ocr": "read text",
+    "scroll": "scroll-capture",
+    "color": "copy color",
+}
+WINDOW_STYLES = ["plain", "transparent", "shadow"]
+LOUPE_PX = 15        # source pixels across the magnifier
+LOUPE_ZOOM = 9
 
 # AT-SPI roles that are usually anonymous layout containers
 GENERIC_ROLES = {"panel", "filler", "unknown", "section", "layered pane", "split pane", "grouping",
@@ -60,20 +65,31 @@ class Level:
 
 class Selection:
     """rect: global logical area. win: record through that window's own stream
-    (unaffected by other windows covering it); None: record the screen area."""
+    (unaffected by other windows covering it); None: record the screen area.
+    kind: screen | window | content | element | area | region. color: picked QColor (color mode)."""
 
-    def __init__(self, rect, win, label):
-        self.rect, self.win, self.label = rect, win, label
+    def __init__(self, rect, win, label, kind="region"):
+        self.rect, self.win, self.label, self.kind = rect, win, label, kind
         self.show_cursor = True
+        self.window_style = "plain"
+        self.color = None
 
 
 class Picker(QObject):
     finished = pyqtSignal(object)  # Selection or None
     _segmented = pyqtSignal(str, object)
 
-    def __init__(self, windows, inspector, own_pid, show_cursor=True):
+    def __init__(self, windows, inspector, own_pid, show_cursor=True, mode="record", backgrounds=None,
+                 magnifier=True, window_style="plain"):
+        """backgrounds: {screen name: QImage} frozen screens (screenshot modes) — drawn instead of the
+        live desktop, and used by the magnifier."""
         super().__init__()
         self.show_cursor = show_cursor
+        self.mode = mode
+        self.backgrounds = backgrounds or {}
+        self.frozen = mode != "record" and bool(self.backgrounds)
+        self.magnifier = magnifier or mode == "color"
+        self.window_style = window_style
         self.windows = [w for w in reversed(windows)  # topmost first
                         if w["visible"] and (w["normal"] or w["dialog"]) and w["pid"] != own_pid
                         and w["cls"] != "xwaylandvideobridge"]
@@ -242,6 +258,9 @@ class Picker(QObject):
     def mouse_move(self, p):
         self.cursor = p
         self.crumb_hover = None
+        if self.mode == "color":
+            self._update()
+            return
         if self.press is not None and (self.drag is not None or (p - self.press).manhattanLength() > 6):
             bounds = self._screen_at(self.press).geometry()
             self.drag = QRect(self.press, p).normalized().intersected(bounds)
@@ -271,10 +290,14 @@ class Picker(QObject):
             w = self._window_at(press)
             if w and not QRect(*w["frame"]).contains(drag):
                 w = None
-            self._finish(Selection(drag, w, "Region"))
+            if self.mode == "scroll" and not w:
+                self.status = "drag inside one window"
+                return self._update()
+            self._finish(Selection(drag, w, "Region", "region"))
         elif drag is None:
             self.cursor = p
-            self._refresh()
+            if self.mode != "color":
+                self._refresh()
             self.select_current()
         else:
             self._update()
@@ -297,27 +320,75 @@ class Picker(QObject):
         self._update()
 
     def select_current(self):
+        if self.mode == "color":
+            return self._pick_color()
         if not self.levels:
             return
         lv = self.levels[self.level]
-        self._finish(Selection(lv.rect, lv.win, lv.describe()))
+        if self.mode == "scroll" and not lv.win:
+            self.status = "pick a window or an area inside one"
+            return self._update()
+        self._finish(Selection(lv.rect, lv.win, lv.describe(), lv.kind))
 
     def toggle_cursor(self):
         self.show_cursor = not self.show_cursor
         self._update()
+
+    def toggle_magnifier(self):
+        self.magnifier = not self.magnifier
+        self._update()
+
+    def cycle_window_style(self):
+        i = WINDOW_STYLES.index(self.window_style) if self.window_style in WINDOW_STYLES else 0
+        self.window_style = WINDOW_STYLES[(i + 1) % len(WINDOW_STYLES)]
+        self._update()
+
+    def window_level_selected(self):
+        return (self.drag is None and self.levels and self.levels[self.level].kind == "window")
+
+    # -- frozen pixels (magnifier, color picker) --
+
+    def background_at(self, p):
+        """(QImage, device-pixel QPoint) under a global logical point, or (None, None)."""
+        scr = self._screen_at(p)
+        img = self.backgrounds.get(scr.name())
+        if img is None:
+            return None, None
+        g = scr.geometry()
+        dpr = img.devicePixelRatio()
+        x = min(max(int((p.x() - g.x()) * dpr), 0), img.width() - 1)
+        y = min(max(int((p.y() - g.y()) * dpr), 0), img.height() - 1)
+        return img, QPoint(x, y)
+
+    def color_at(self, p):
+        img, px = self.background_at(p)
+        return QColor(img.pixel(px)) if img is not None else None
+
+    def _pick_color(self):
+        c = self.color_at(self.cursor) if self.cursor is not None else None
+        if c is None:
+            return
+        sel = Selection(QRect(self.cursor, self.cursor), None, c.name(), "color")
+        sel.color = c
+        self._finish(sel)
 
     def _finish(self, sel):
         if self._done:
             return
         if sel is not None:
             sel.show_cursor = self.show_cursor
+            sel.window_style = self.window_style
         with self._cond:
             self._done = True
             self._cond.notify()
-        for o in self.overlays:
-            o.hide()
-            o.deleteLater()
-        self.finished.emit(sel)
+        # hand over while our overlay still has focus (Wayland clipboard) and is still covering
+        # the screen (the in-place editor replaces it without flicker), then close
+        try:
+            self.finished.emit(sel)
+        finally:
+            for o in self.overlays:
+                o.hide()
+                o.deleteLater()
 
 
 def _dashed(color, width=1):
@@ -407,8 +478,12 @@ class Overlay(QWidget):
             self.picker.step(-1)
         elif k == Qt.Key.Key_Tab:
             self.picker.toggle_mode()
-        elif k == Qt.Key.Key_C:
+        elif k == Qt.Key.Key_C and self.picker.mode == "record":
             self.picker.toggle_cursor()
+        elif k == Qt.Key.Key_M and self.picker.backgrounds:
+            self.picker.toggle_magnifier()
+        elif k == Qt.Key.Key_W and self.picker.mode == "shot":
+            self.picker.cycle_window_style()
 
     # -- drawing --
 
@@ -417,15 +492,30 @@ class Overlay(QWidget):
         origin = self.scr.geometry().topLeft()
         dpr = self.scr.devicePixelRatio()
         p = QPainter(self)
-        p.fillRect(self.rect(), DIM)
         here = pk.cursor is not None and self.scr.geometry().contains(pk.cursor)
+        bg = pk.backgrounds.get(self.scr.name()) if pk.frozen else None
+        sel = pk.current() if pk.mode != "color" else None
 
-        sel = pk.current()
+        if bg is not None:
+            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            p.drawImage(QRectF(self.rect()), bg, QRectF(bg.rect()))
+            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            if pk.mode != "color":
+                dim = QRegion(self.rect())
+                if sel is not None:
+                    dim = dim.subtracted(QRegion(sel.translated(-origin)))
+                p.setClipRegion(dim)
+                p.fillRect(self.rect(), DIM)
+                p.setClipping(False)
+        else:
+            p.fillRect(self.rect(), DIM)
+
         if sel is not None:
             local = sel.translated(-origin)
-            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-            p.fillRect(local, Qt.GlobalColor.transparent)
-            p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            if bg is None:
+                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                p.fillRect(local, Qt.GlobalColor.transparent)
+                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
 
             if pk.drag is None:
                 # the other levels: dashed, brighter for the smaller ones you can scroll into
@@ -455,9 +545,67 @@ class Overlay(QWidget):
         self._crumbs, self._crumb_bar = [], QRect()
         self._hint_bar = self._cursor_toggle = QRect()
         if here:
-            self._draw_crumbs(p, pk)
+            if pk.mode != "color":
+                self._draw_crumbs(p, pk)
             self._draw_hint(p)
+            if pk.magnifier and pk.backgrounds and self._hint_bar.contains(pk.cursor - origin) is False \
+                    and not self._crumb_bar.contains(pk.cursor - origin):
+                self._draw_loupe(p, pk, pk.cursor - origin)
         p.end()
+
+    def _draw_loupe(self, p, pk, at):
+        """Pixel-exact zoom of the frozen screen around the cursor, with its color."""
+        img, px = pk.background_at(pk.cursor)
+        if img is None:
+            return
+        n, z = LOUPE_PX, LOUPE_ZOOM
+        if pk.mode == "color":
+            n, z = 17, 11
+        size = n * z
+        fm, fb = QFontMetrics(self.f_text), QFontMetrics(self.f_bold)
+        info_h = fb.height() + 10
+        color = QColor(img.pixel(px))
+        text = color.name().upper()
+        if pk.mode == "color":
+            text += f"   {color.red()}, {color.green()}, {color.blue()}"
+        else:
+            text += f"   {px.x()}, {px.y()}"
+        info_w = info_h - 12 + 6 + 8 + fb.horizontalAdvance(text) + 10
+        if info_w > size:  # widen the zoom to the label (odd count: the cursor pixel stays centred)
+            n = -(-info_w // z) | 1
+            size = n * z
+        box = QRect(0, 0, size, size + info_h)
+        x, y = at.x() + 24, at.y() + 24   # bottom-right of the cursor, flipped at the edges
+        if x + box.width() > self.width() - 4:
+            x = at.x() - 24 - box.width()
+        if y + box.height() > self.height() - 4:
+            y = at.y() - 24 - box.height()
+        box.moveTo(x, y)
+        src = QRect(px.x() - n // 2, px.y() - n // 2, n, n)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+        p.fillRect(box, PANEL_BG)
+        crop = img.copy(src)  # out-of-image parts come back transparent
+        crop.setDevicePixelRatio(1)
+        p.drawImage(QRect(x, y, size, size), crop)
+        # pixel grid, faint
+        p.setPen(QPen(QColor(0, 0, 0, 40), 1))
+        for i in range(1, n):
+            p.drawLine(x + i * z, y, x + i * z, y + size)
+            p.drawLine(x, y + i * z, x + size, y + i * z)
+        c = n // 2 * z
+        p.setPen(QPen(QColor(0, 0, 0), 1))
+        p.drawRect(x + c - 1, y + c - 1, z + 1, z + 1)
+        p.setPen(QPen(QColor(255, 255, 255), 1))
+        p.drawRect(x + c, y + c, z - 1, z - 1)
+        p.setPen(QPen(ACCENT, 1))
+        p.drawRect(QRect(x, y, size, size).adjusted(0, 0, -1, -1))
+        sw = QRect(x + 6, y + size + 6, info_h - 12, info_h - 12)
+        p.fillRect(sw, color)
+        p.setPen(QPen(MUTED, 1))
+        p.drawRect(sw)
+        p.setFont(self.f_bold)
+        p.setPen(TEXT)
+        p.drawText(QRect(sw.right() + 8, y + size, box.width(), info_h), Qt.AlignmentFlag.AlignVCenter, text)
 
     def _draw_tag(self, p, r, text, size):
         fm, fb = QFontMetrics(self.f_text), QFontMetrics(self.f_bold)
@@ -528,58 +676,81 @@ class Overlay(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
     def _draw_hint(self, p):
-        w_ = self.picker.levels[-1].win if self.picker.levels else None
+        pk = self.picker
+        w_ = pk.levels[-1].win if pk.levels else None
         mode = None
         if w_:
-            mode = "detect from pixels" if not self.picker.pixel_mode(w_) else "use accessibility"
-        items = [("Scroll ▼ ▲", "smaller / bigger"), ("Click", "record"), ("Drag", "free region")]
-        if mode:
-            items.append(("Tab", mode))
-        items.append(("C", "record cursor"))
-        items.append(("Esc", "cancel"))
+            mode = "detect from pixels" if not pk.pixel_mode(w_) else "use accessibility"
+        if pk.mode == "color":
+            items = [("Click", "copy color"), ("Esc", "cancel")]
+        else:
+            items = [("Scroll ▼ ▲", "smaller / bigger"), ("Click", MODES.get(pk.mode, "pick"))]
+            if pk.mode != "scroll":
+                items.append(("Drag", "free region"))
+            if mode:
+                items.append(("Tab", mode))
+            if pk.mode == "record":
+                items.append(("C", "record cursor"))
+            if pk.mode == "shot" and pk.window_level_selected():
+                items.append(("W", f"window: {pk.window_style}"))
+            if pk.backgrounds:
+                items.append(("M", "magnifier " + ("off" if pk.magnifier else "on")))
+            items.append(("Esc", "cancel"))
         fm, fb = QFontMetrics(self.f_text), QFontMetrics(self.f_bold)
         gap, inner = 26, 8
         box = fm.ascent()  # checkbox size
         widths = [fb.horizontalAdvance(k) + 14 + inner + fm.horizontalAdvance(d) + (box + 8 if k == "C" else 0)
                   for k, d in items]
         h = fb.height() + 18
-        total = sum(widths) + gap * (len(items) - 1) + 36
-        bar = QRect((self.width() - total) // 2, self.height() - h - 36, total, h)
+        # wrap into rows on narrow (e.g. portrait) screens
+        rows, row, row_w = [], [], 36
+        for it, wd in zip(items, widths):
+            need = wd + (gap if row else 0)
+            if row and row_w + need > self.width() - 32:
+                rows.append((row, row_w))
+                row, row_w, need = [], 36, wd
+            row.append((it, wd))
+            row_w += need
+        rows.append((row, row_w))
+        total = max(w for _, w in rows)
+        bar = QRect((self.width() - total) // 2, self.height() - h * len(rows) - 36, total, h * len(rows))
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(PANEL_BG)
         p.drawRect(bar)
         self._hint_bar = bar
-        x = bar.left() + 18
-        for (k, d), wd in zip(items, widths):
-            kw = fb.horizontalAdvance(k) + 14
-            if k == "C":  # clickable checkbox
-                self._cursor_toggle = QRect(x - 6, bar.top() + 2, wd + 12, h - 4)
-                if self._toggle_hover:
-                    p.setPen(Qt.PenStyle.NoPen)
-                    p.setBrush(CHIP_BG)
-                    p.drawRect(self._cursor_toggle)
-            key = QRect(x, bar.top() + 6, kw, h - 12)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(CHIP_HOVER)
-            p.drawRect(key)
-            p.setFont(self.f_bold)
-            p.setPen(TEXT)
-            p.drawText(key, Qt.AlignmentFlag.AlignCenter, k)
-            tx = x + kw + inner
-            if k == "C":
-                on = self.picker.show_cursor
-                cb = QRect(tx, bar.top() + (h - box) // 2, box, box)
-                p.setBrush(ACCENT if on else Qt.BrushStyle.NoBrush)
-                p.setPen(QPen(ACCENT if on else MUTED, 1.5))
-                p.drawRect(cb)
-                if on:
-                    p.setPen(QPen(QColor("#000000"), 2))
-                    p.drawLine(cb.left() + 3, cb.center().y(), cb.center().x() - 1, cb.bottom() - 3)
-                    p.drawLine(cb.center().x() - 1, cb.bottom() - 3, cb.right() - 3, cb.top() + 3)
-                tx += box + 8
-            p.setFont(self.f_text)
-            p.setPen(TEXT if k == "C" else MUTED)
-            p.drawText(QRect(tx, bar.top(), wd, h), Qt.AlignmentFlag.AlignVCenter, d)
-            x += wd + gap
+        for ri, (row, row_w) in enumerate(rows):
+            top = bar.top() + ri * h
+            x = bar.left() + 18 + (total - row_w) // 2
+            for (k, d), wd in row:
+                kw = fb.horizontalAdvance(k) + 14
+                if k == "C":  # clickable checkbox
+                    self._cursor_toggle = QRect(x - 6, top + 2, wd + 12, h - 4)
+                    if self._toggle_hover:
+                        p.setPen(Qt.PenStyle.NoPen)
+                        p.setBrush(CHIP_BG)
+                        p.drawRect(self._cursor_toggle)
+                key = QRect(x, top + 6, kw, h - 12)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(CHIP_HOVER)
+                p.drawRect(key)
+                p.setFont(self.f_bold)
+                p.setPen(TEXT)
+                p.drawText(key, Qt.AlignmentFlag.AlignCenter, k)
+                tx = x + kw + inner
+                if k == "C":
+                    on = self.picker.show_cursor
+                    cb = QRect(tx, top + (h - box) // 2, box, box)
+                    p.setBrush(ACCENT if on else Qt.BrushStyle.NoBrush)
+                    p.setPen(QPen(ACCENT if on else MUTED, 1.5))
+                    p.drawRect(cb)
+                    if on:
+                        p.setPen(QPen(QColor("#000000"), 2))
+                        p.drawLine(cb.left() + 3, cb.center().y(), cb.center().x() - 1, cb.bottom() - 3)
+                        p.drawLine(cb.center().x() - 1, cb.bottom() - 3, cb.right() - 3, cb.top() + 3)
+                    tx += box + 8
+                p.setFont(self.f_text)
+                p.setPen(TEXT if k == "C" else MUTED)
+                p.drawText(QRect(tx, top, wd, h), Qt.AlignmentFlag.AlignVCenter, d)
+                x += wd + gap
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)

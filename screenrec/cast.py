@@ -76,17 +76,19 @@ class CastStream:
                 proc.kill()
 
 
-def grab_frame(args, timeout=3.0):
-    """Blocking: one RGB frame (H, W, 3) uint8 from a fresh stream. Safe to call from a thread."""
+def grab_frame(args, timeout=3.0, alpha=False):
+    """Blocking: one frame from a fresh stream, (H, W, 3) RGB uint8, or (H, W, 4) RGBA with
+    alpha=True (window streams carry real transparency). Safe to call from a thread."""
     proc = subprocess.Popen([HELPER, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     pipeline = None
+    fmt = "RGBA" if alpha else "RGBx"
     try:
         kind, _, rest = proc.stdout.readline().strip().partition(" ")
         if kind != "node":
             raise RuntimeError(rest or "capture helper failed")
         pipeline = Gst.parse_launch(
             f"pipewiresrc path={rest} always-copy=true ! capsfilter caps=video/x-raw ! videoconvert"
-            " ! video/x-raw,format=RGBx ! appsink name=sink max-buffers=1 drop=true")
+            f" ! video/x-raw,format={fmt} ! appsink name=sink max-buffers=1 drop=true")
         pipeline.set_state(Gst.State.PLAYING)
         sample = pipeline.get_by_name("sink").emit("try-pull-sample", int(timeout * Gst.SECOND))
         if sample is None:
@@ -96,7 +98,8 @@ def grab_frame(args, timeout=3.0):
         buf = sample.get_buffer()
         ok, m = buf.map(Gst.MapFlags.READ)
         try:
-            frame = np.ndarray((h, w, 4), np.uint8, m.data)[:, :, :3].copy()
+            frame = np.ndarray((h, w, 4), np.uint8, m.data)
+            frame = frame.copy() if alpha else frame[:, :, :3].copy()
         finally:
             buf.unmap(m)
         return frame
@@ -108,3 +111,43 @@ def grab_frame(args, timeout=3.0):
             proc.wait(2)
         except (OSError, subprocess.TimeoutExpired):
             proc.kill()
+
+
+def to_qimage(frame):
+    """numpy RGB / RGBA frame -> QImage (owns its pixels)."""
+    from PyQt6.QtGui import QImage
+    h, w, c = frame.shape
+    frame = np.ascontiguousarray(frame)
+    fmt = QImage.Format.Format_RGBA8888 if c == 4 else QImage.Format.Format_RGB888
+    return QImage(frame.data, w, h, w * c, fmt).copy()
+
+
+def grab_window(window_id, pointer=POINTER_HIDDEN):
+    """A window's own pixels as an RGBA QImage (frame geometry, correct even when covered)."""
+    return to_qimage(grab_frame(window_args(window_id, pointer), alpha=True))
+
+
+def grab_screens(screens, pointer=POINTER_HIDDEN):
+    """Grab several QScreens at once. Returns {screen name: QImage in device pixels} with
+    devicePixelRatio set; screens that failed are missing. Call from the GUI thread."""
+    import threading
+    out, threads = {}, []
+
+    def one(name, g, dpr):
+        try:
+            out[name] = grab_frame(region_args(g.x(), g.y(), g.width(), g.height(), dpr, pointer))
+        except Exception as e:
+            print("screenrec: screen capture failed:", name, e)
+
+    for s in screens:
+        t = threading.Thread(target=one, args=(s.name(), s.geometry(), s.devicePixelRatio()))
+        t.start()
+        threads.append((t, s))
+    images = {}
+    for t, s in threads:
+        t.join()
+        if s.name() in out:
+            img = to_qimage(out[s.name()])
+            img.setDevicePixelRatio(img.width() / s.geometry().width())
+            images[s.name()] = img
+    return images

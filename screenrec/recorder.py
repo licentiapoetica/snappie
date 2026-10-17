@@ -83,20 +83,25 @@ class Recorder:
     window by themselves, even when it is covered or moved.
     """
 
-    def __init__(self, node, ref, rect, path, codec="hevc", quality="good", qp=None,
-                 fps=None, scale=1.0, system_audio=True, mic=False, on_done=None, on_error=None):
+    def __init__(self, node, ref, rect, path, codec="hevc", quality="good", qp=None, crop=None,
+                 fps=None, scale=1.0, system_audio=True, mic=False, overlay=False,
+                 on_done=None, on_error=None):
         self.ref, self.rect, self.path = ref, rect, path
         self._last_pts = None
         self.codec = codec
         self.on_done, self.on_error = on_done, on_error
-        self._crop = None   # (x, y, w, h) in stream pixels, fixed after the first frame
+        self._crop = crop   # (x, y, w, h) in stream pixels, fixed after the first frame
         self._stopping = False
+        self.source_lost = False  # KWin's stream died; the file was finalized anyway
 
         rate = f" ! videorate ! video/x-raw,framerate={fps}/1" if fps else ""
         desc = [
             f"pipewiresrc name=src path={node} do-timestamp=true"
             f" keepalive-time=1000 provide-clock=false always-copy=true"
-            f" ! capsfilter caps=video/x-raw ! videocrop name=crop{rate} ! queue max-size-buffers=8 leaky=downstream"
+            f" ! capsfilter caps=video/x-raw ! videocrop name=crop{rate}"
+            # live drawings / click ripples blended in (window streams don't contain our overlay)
+            + (" ! gdkpixbufoverlay name=ov" if overlay else "")
+            + " ! queue max-size-buffers=8 leaky=downstream"
         ]
         enc = _encoder_desc(codec, quality, qp, rect[2] * rect[3] * scale * scale)
         if codec == "av1-sw":
@@ -122,6 +127,7 @@ class Recorder:
         self.pipeline = Gst.parse_launch("".join(desc))
         self.pipeline.use_clock(Gst.SystemClock.obtain())
         self.crop = self.pipeline.get_by_name("crop")
+        self.ov = self.pipeline.get_by_name("ov")
         self.crop.get_static_pad("sink").add_probe(
             Gst.PadProbeType.EVENT_DOWNSTREAM | Gst.PadProbeType.BUFFER, self._probe)
         bus = self.pipeline.get_bus()
@@ -166,6 +172,30 @@ class Recorder:
         for prop, val in (("left", px), ("top", py), ("right", W - px - pw), ("bottom", H - py - ph)):
             self.crop.set_property(prop, val)
 
+    def set_overlay(self, image, x=0, y=0):
+        """Blend a QImage (RGBA8888, stream pixels) at x, y into every frame; None clears it."""
+        if not self.ov:
+            return
+        if image is None or image.isNull():
+            self.ov.set_property("alpha", 0.0)
+            return
+        import gi
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import GdkPixbuf
+        from PyQt6.QtGui import QImage
+        img = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        data = bytes(img.constBits().asarray(img.sizeInBytes()))
+        pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(data), GdkPixbuf.Colorspace.RGB, True, 8,
+                                             img.width(), img.height(), img.bytesPerLine())
+        self.ov.set_property("pixbuf", pb)
+        self.ov.set_property("offset-x", int(x))
+        self.ov.set_property("offset-y", int(y))
+        self.ov.set_property("alpha", 1.0)
+
+    @property
+    def crop_rect(self):
+        return self._crop
+
     @property
     def size(self):
         return self._crop and self._crop[2:]
@@ -193,6 +223,13 @@ class Recorder:
             self._finish()
         elif msg.type == Gst.MessageType.ERROR:
             err, dbg = msg.parse_error()
+            if msg.src.get_name() == "src" and not self._stopping:
+                # The screen stream died (KWin side). The video branch already got EOS from
+                # the source; end the audio too so the file is finalized, then report it.
+                self.source_lost = self._stopping = True
+                self.pipeline.send_event(Gst.Event.new_eos())
+                GLib.timeout_add_seconds(5, self._force_finish)
+                return
             self._teardown()
             if self.on_error:
                 self.on_error(f"{err.message}\n{dbg or ''}".strip())
@@ -207,6 +244,47 @@ class Recorder:
         self._teardown()
         if self.on_done:
             self.on_done(self.path)
+
+
+def join_parts(parts, path):
+    """Concatenate recording segments (same format) into `path` (MKV). Returns path."""
+    if len(parts) == 1:
+        if parts[0] != path:
+            os.replace(parts[0], path)
+        return path
+    listing = path + ".parts.txt"
+    with open(listing, "w") as f:
+        for p in parts:
+            f.write("file '" + p.replace("'", "'\\''") + "'\n")
+    tmp = path[:-4] + ".joined.mkv"
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", listing,
+                        "-map", "0", "-c", "copy", tmp], capture_output=True, text=True)
+    os.unlink(listing)
+    if r.returncode != 0:
+        return parts[0]  # keep the segments as they are
+    for p in parts:
+        os.unlink(p)
+    os.replace(tmp, path)
+    return path
+
+
+def to_animation(video, out_path, fps=15, max_width=960):
+    """Convert a recording to an optimized GIF or animated WebP (by out_path's extension).
+    Returns out_path, or raises RuntimeError."""
+    scale = f",scale='min({max_width},iw)':-2:flags=lanczos" if max_width else ""
+    if out_path.endswith(".webp"):
+        cmd = ["-vf", f"fps={fps}{scale}", "-c:v", "libwebp_anim", "-lossless", "0", "-quality", "80",
+               "-compression_level", "4", "-loop", "0", "-an"]
+    else:
+        # one palette for the whole clip, only changed rectangles re-dithered: small and stable
+        cmd = ["-vf", f"fps={fps}{scale},split[a][b];[a]palettegen=stats_mode=diff:max_colors=256[p];"
+                      "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
+               "-loop", "0", "-an"]
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", video, *cmd, out_path],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("converting failed: " + (r.stderr.strip().splitlines() or ["ffmpeg error"])[-1])
+    return out_path
 
 
 def remux_mp4(mkv_path, codec):

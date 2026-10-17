@@ -6,16 +6,44 @@ relative to the app's surface, which is KWin's bufferGeometry (CSD apps like
 Chromium, shadows included) or clientGeometry (server-side decorated apps).
 """
 
+import socket
 import time
 
 import dbus
-import gi
 
-gi.require_version("Atspi", "2.0")
-from gi.repository import Atspi  # noqa: E402
-
-WIN = Atspi.CoordType.WINDOW
+Atspi = None      # loaded by bus_usable(): libatspi aborts the whole process if the bus is gone
+WIN = None
 MAX_DEPTH = 40
+
+
+def bus_usable(bus):
+    """Can we reach the accessibility bus? Checked before loading libatspi, which calls
+    abort() (uncatchable) when the bus socket is dead."""
+    global Atspi, WIN
+    if Atspi is not None:
+        return True
+    try:
+        addr = str(bus.get_object("org.a11y.Bus", "/org/a11y/bus").GetAddress(dbus_interface="org.a11y.Bus"))
+        path = abstract = None
+        for part in addr.split(";")[0].split(":", 1)[1].split(","):
+            k, _, v = part.partition("=")
+            if k == "path":
+                path = v
+            elif k == "abstract":
+                abstract = "\0" + v
+        target = path or abstract
+        if not target:
+            return False
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sk:
+            sk.settimeout(1)
+            sk.connect(target)
+    except (dbus.DBusException, OSError, IndexError, ValueError):
+        return False
+    import gi
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi as _Atspi
+    Atspi, WIN = _Atspi, _Atspi.CoordType.WINDOW
+    return True
 
 
 def enable_accessibility(bus):
@@ -51,12 +79,16 @@ class Element:
 
 
 class Inspector:
-    def __init__(self, own_pid):
+    def __init__(self, own_pid, bus=None):
         self.own_pid = own_pid
         self._apps = None          # pid -> [Atspi app]
         self._apps_at = 0.0
         self._frames = {}          # window id -> (frame accessible, (ox, oy)) or None
-        Atspi.set_timeout(400, 2000)
+        self.usable = bus_usable(bus or dbus.SessionBus())
+        if self.usable:
+            Atspi.set_timeout(400, 2000)
+        else:
+            print("screenrec: accessibility bus unreachable, finding inner areas from pixels only")
 
     def _app_index(self, want_pid=None):
         stale = want_pid is not None and want_pid not in (self._apps or {}) \
@@ -111,10 +143,12 @@ class Inspector:
         return found
 
     def has_tree(self, win):
-        return self._frame_for(win) is not None
+        return self.usable and self._frame_for(win) is not None
 
     def chain_at(self, win, gx, gy):
         """Elements under a global point, outermost first."""
+        if not self.usable:
+            return []
         hit = self._frame_for(win)
         if not hit:
             return []
