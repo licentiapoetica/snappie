@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import QButtonGroup, QColorDialog, QFrame, QHBoxLayout, QLa
 
 from .style import ACCENT_TEXT, MUTED, PALETTE, RECORD, TEXT
 
-TITLE = "screenrec — recording"
+TITLE = "Snappie — recording"
 
 _BTN = ("QPushButton { background: transparent; color: #eff0f1; border: none; border-radius: 0;"
         " padding: 4px 9px; font-weight: bold; }"
@@ -244,11 +244,11 @@ class Controls(QWidget):
 
         self.pause = QPushButton("❚❚")
         self.pause.setCheckable(True)
-        self.pause.setToolTip("Pause / resume  (screenrec pause)")
+        self.pause.setToolTip("Pause / resume  (snappie pause)")
         self.pause.toggled.connect(self._paused)
         self.draw = QPushButton("✎")
         self.draw.setCheckable(True)
-        self.draw.setToolTip("Draw on the recording  (screenrec draw)\n"
+        self.draw.setToolTip("Draw on the recording  (snappie draw)\n"
                              "1–8 colors · wheel width · Shift arrow · R box · Z undo · C clear · Esc done")
         self.draw.toggled.connect(self.draw_toggled)
         for b in (self.pause, self.draw):

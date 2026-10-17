@@ -32,7 +32,7 @@ _ACTION_KEYS = {  # (key, ctrl, shift) -> action
 
 class InPlaceEditor(QWidget):
     action = pyqtSignal(str, object)    # (name, Document)
-    TITLE = "screenrec — editor"
+    TITLE = "Snappie — editor"
 
     def __init__(self, screen, background, rect, windows=None):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)

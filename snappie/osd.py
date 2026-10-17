@@ -10,7 +10,7 @@ from .style import ACCENT, MUTED, PANEL_BG, TEXT
 class Countdown(QWidget):
     """Big seconds counter in the middle of a screen. done() fires after it has hidden itself
     (with a short pause so it's gone from the screen before anything is captured)."""
-    TITLE = "screenrec — countdown"
+    TITLE = "Snappie — countdown"
     done = pyqtSignal()
     cancelled = pyqtSignal()
 
@@ -72,7 +72,7 @@ class Countdown(QWidget):
 
 class ScrollBarOsd(QWidget):
     """'Scrolling capture · 1234 px  [Stop]' shown under the area being captured."""
-    TITLE = "screenrec — scrolling capture"
+    TITLE = "Snappie — scrolling capture"
     stop_clicked = pyqtSignal()
 
     def __init__(self):
@@ -116,7 +116,7 @@ class AreaBorder(QWidget):
     """Dashed frame just outside the recorded area: shows what's being recorded without being
     in the recording (region streams only see the area; window streams only the window).
     Click-through; red while recording, amber while paused."""
-    TITLE = "screenrec — recording area"
+    TITLE = "Snappie — recording area"
     MARGIN = 3       # logical px between the window edge and the area: 2 px line + 1 px gap
 
     def __init__(self):

@@ -396,7 +396,7 @@ class HistoryWindow(QMainWindow):
     are done right here (they need nothing from the app)."""
 
     action = pyqtSignal(str, object)
-    TITLE = "screenrec — history"
+    TITLE = "Snappie — history"
     LOCAL = {"open", "folder", "copy_path", "copy_url", "open_url", "delete", "remove"}
 
     def __init__(self, parent=None):

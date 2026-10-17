@@ -1,19 +1,19 @@
 /*
- * screenrec-cast: ask KWin for a PipeWire stream of a window or a screen region,
+ * snappie-cast: ask KWin for a PipeWire stream of a window or a screen region,
  * or inject pointer/keyboard input.
  *
  * KWin only exposes zkde_screencast_unstable_v1 and org_kde_kwin_fake_input to
  * executables whose .desktop file lists them in X-KDE-Wayland-Interfaces
  * (that's how Spectacle does it), so this has to be a real binary, not a script.
  *
- *   screenrec-cast window <uuid> <pointer>
- *   screenrec-cast region <x> <y> <w> <h> <scale> <pointer>
+ *   snappie-cast window <uuid> <pointer>
+ *   snappie-cast region <x> <y> <w> <h> <scale> <pointer>
  *
  * pointer: 1 hidden, 2 embedded.  Prints "node <id>", then keeps the stream
  * alive until stdin is closed.  Prints "closed" if KWin ends the stream
  * (window closed) and "error <msg>" on failure.
  *
- *   screenrec-cast input
+ *   snappie-cast input
  *
  * Prints "ready", then reads commands from stdin, one per line, until EOF:
  *   move X Y        pointer to X, Y (global logical coordinates)
@@ -120,7 +120,7 @@ static int run_input(struct wl_display *dpy)
         printf("error KWin did not offer org_kde_kwin_fake_input (helper not authorized - run helper/build.sh)\n");
         return 3;
     }
-    org_kde_kwin_fake_input_authenticate(fake_input, "screenrec", "scrolling capture");
+    org_kde_kwin_fake_input_authenticate(fake_input, "snappie", "scrolling capture");
     if (wl_display_roundtrip(dpy) < 0) {
         printf("error fake input was refused\n");
         return 1;

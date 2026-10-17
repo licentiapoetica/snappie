@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import QWidget
 
 from . import settings, style
 
-TITLE = "screenrec — live overlay"
+TITLE = "Snappie — live overlay"
 
 FADE = 0.4          # s, fade-out of strokes, key bubble and hint chip
 RIPPLE = 0.45       # s, click ripple
@@ -895,7 +895,7 @@ class InputWatcher(QObject):
             self._watch_layout(True)
         self._stop.clear()
         self._wake = os.pipe()
-        self._thread = threading.Thread(target=self._run, name="screenrec-input", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="snappie-input", daemon=True)
         self._thread.start()
 
     def stop(self):

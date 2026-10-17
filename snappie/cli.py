@@ -1,4 +1,4 @@
-"""Command line. Kept free of heavy imports: hotkeys run `screenrec <command>`, and when the
+"""Command line. Kept free of heavy imports: hotkeys run `snappie <command>`, and when the
 tray app is running that process only parses, forwards over D-Bus and exits."""
 
 import argparse
@@ -17,7 +17,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser():
-    ap = _Parser(prog="screenrec", description="Screenshots, annotation and screen recording for "
+    ap = _Parser(prog="snappie", description="Screenshots, annotation and screen recording for "
                                                "KDE Plasma (Wayland). Without a command: start the tray app.")
     sub = ap.add_subparsers(dest="cmd", parser_class=_Parser, metavar="command")
 
@@ -74,7 +74,7 @@ def _record_args(r):
 
 
 def normalize(argv):
-    """Old style `screenrec [record options]` and `--stop` still work."""
+    """Old style `snappie [record options]` and `--stop` still work."""
     argv = list(argv)
     if not argv:
         return ["tray"]

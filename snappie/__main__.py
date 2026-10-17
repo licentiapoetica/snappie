@@ -1,14 +1,14 @@
-"""screenrec — screenshots, annotation and screen recording for KDE Plasma (Wayland)."""
+"""Snappie — screenshots, annotation and screen recording for KDE Plasma (Wayland)."""
 
 import os
 import signal
 import sys
 
-SERVICE = "io.github.screenrec"
+SERVICE = "io.github.snappie"
 
 
 def _forward(argv):
-    """If screenrec is already running, hand it the command line. Returns an exit code, or None
+    """If snappie is already running, hand it the command line. Returns an exit code, or None
     when nothing is running. Imports only dbus: this is the hotkey path, it must be quick."""
     import dbus
     # a private connection: the shared one must be created later, with the GLib main loop
@@ -20,7 +20,7 @@ def _forward(argv):
         reply = str(bus.get_object(SERVICE, "/").run(dbus.Array(argv, signature="s"),
                                                      dbus_interface=SERVICE, timeout=10))
     except dbus.DBusException as e:
-        print("screenrec:", e.get_dbus_message() or e, file=sys.stderr)
+        print("snappie:", e.get_dbus_message() or e, file=sys.stderr)
         return 1
     finally:
         if bus is not None:
@@ -48,7 +48,7 @@ def main():
     if ns.cmd in ("stop", "pause", "draw", "quit"):
         code = _forward(cli.normalize(argv))
         if code is None:
-            print(f"screenrec: nothing is running ({ns.cmd})", file=sys.stderr)
+            print(f"snappie: nothing is running ({ns.cmd})", file=sys.stderr)
             return 1
         return code
     code = _forward(cli.normalize(argv))
@@ -62,7 +62,11 @@ def main():
     from gi.repository import GLib
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
-    from . import a11y, cast
+    from . import a11y, cast, migrate
+    try:
+        migrate.run(bus)          # from the old "screenrec" name, once
+    except Exception as e:  # noqa: BLE001 - never block starting
+        print("snappie: migrating from screenrec failed:", e, file=sys.stderr)
     from .app_util import log
     from .kwin import AlreadyRunning, KWin
     try:
@@ -79,8 +83,11 @@ def main():
     os.environ.setdefault("QT_LOGGING_RULES", "qt.accessibility.atspi=false")
     from PyQt6.QtWidgets import QApplication
     qapp = QApplication(sys.argv[:1])
-    qapp.setApplicationName("screenrec")
-    qapp.setDesktopFileName("screenrec")
+    qapp.setApplicationName("snappie")
+    qapp.setDesktopFileName("snappie")
+    qapp.setApplicationDisplayName("Snappie")
+    from .icons import app_icon
+    qapp.setWindowIcon(app_icon())
     qapp.setQuitOnLastWindowClosed(False)
     from .app import App
     app = App(bus, kwin, daemon=ns.cmd == "tray")

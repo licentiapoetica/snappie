@@ -14,8 +14,8 @@ import dbus
 import dbus.service
 from gi.repository import GLib
 
-SERVICE = "io.github.screenrec"
-IFACE = "io.github.screenrec"
+SERVICE = "io.github.snappie"
+IFACE = "io.github.snappie"
 
 _LIST_JS = r"""
 // geometry can be fractional (e.g. after dragging a window); we work in whole logical pixels
@@ -81,8 +81,8 @@ function adopt(w) {
     if (ctl || w.pid != pid) return;
     if (w.caption != caption) {
         // the title may arrive after the window: try again when it does
-        if (!w.screenrecWatched) {
-            w.screenrecWatched = true;
+        if (!w.snappieWatched) {
+            w.snappieWatched = true;
             w.captionChanged.connect(function () { adopt(w); });
         }
         return;
@@ -164,7 +164,7 @@ class _Service(dbus.service.Object):
 
     @dbus.service.method(IFACE, in_signature="as", out_signature="s")
     def run(self, argv):
-        """Another `screenrec` invocation forwards its command line here."""
+        """Another `snappie` invocation forwards its command line here."""
         if not self.owner.on_command:
             return "error: busy"
         return self.owner.on_command([str(a) for a in argv]) or ""
@@ -193,7 +193,7 @@ class KWin:
 
     def _run_script(self, source, plugin):
         self._unload(plugin)  # leftovers from a crashed run
-        fd, path = tempfile.mkstemp(prefix="screenrec-", suffix=".js")
+        fd, path = tempfile.mkstemp(prefix="snappie-", suffix=".js")
         with os.fdopen(fd, "w") as f:
             f.write(source.replace("%SERVICE%", SERVICE).replace("%IFACE%", IFACE))
         try:
@@ -206,7 +206,7 @@ class KWin:
     def list_windows(self, timeout=3.0):
         """Return KWin windows in stacking order (bottom first)."""
         self._windows_reply = None
-        plugin = "screenrec_list"
+        plugin = "snappie_list"
         self._run_script(_LIST_JS, plugin)
         ctx = GLib.MainContext.default()
         deadline = time.monotonic() + timeout
@@ -222,7 +222,7 @@ class KWin:
         keepAbove, skipTaskbar, allDesktops, once, pinned). rect is (x, y, w, h), relative
         to the target window's frame when target_id is given, else global logical."""
         self.unplace(caption)
-        plugin = f"screenrec_place_{len(self._placed)}_{abs(hash(caption)) % 100000}"
+        plugin = f"snappie_place_{len(self._placed)}_{abs(hash(caption)) % 100000}"
         src = (_PLACE_JS.replace("%PID%", str(os.getpid()))
                .replace("%CAPTION%", json.dumps(caption))
                .replace("%TARGET%", json.dumps(target_id or ""))
@@ -251,7 +251,7 @@ class KWin:
     def track_cursor(self, target_id=None):
         """Start calling self.on_cursor on pointer motion (until untrack_cursor)."""
         self.untrack_cursor()
-        self._cursor_plugin = "screenrec_cursor"
+        self._cursor_plugin = "snappie_cursor"
         self._run_script(_CURSOR_JS.replace("%TARGET%", json.dumps(target_id or "")), self._cursor_plugin)
 
     def untrack_cursor(self):
@@ -278,8 +278,8 @@ class KWin:
         return (round(got[0][0]), round(got[0][1])) if got else None
 
     def activate(self, window_id):
-        self._run_script(_ACTIVATE_JS.replace("%TARGET%", json.dumps(window_id)), "screenrec_activate")
-        GLib.timeout_add(500, lambda: self._unload("screenrec_activate") and False)
+        self._run_script(_ACTIVATE_JS.replace("%TARGET%", json.dumps(window_id)), "snappie_activate")
+        GLib.timeout_add(500, lambda: self._unload("snappie_activate") and False)
 
     def cleanup(self):
         for caption in list(self._placed):

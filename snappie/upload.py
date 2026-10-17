@@ -25,7 +25,7 @@ from PyQt6.QtCore import QObject, Qt, pyqtSignal
 
 from . import settings
 
-USER_AGENT = "screenrec/1.0 (ShareX-compatible custom uploader)"
+USER_AGENT = "snappie/1.0 (ShareX-compatible custom uploader)"
 TIMEOUT = (15, 300)          # connect, read (seconds); videos can take a while
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 BODIES = ("None", "MultipartFormData", "FormURLEncoded", "JSON", "XML", "Binary")

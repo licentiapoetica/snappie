@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="3 6 60 52">
+  <!-- one-color tray magpie, chunky so it holds up at 16-22 px: the white belly + shoulder
+       markings and the eye are cut out. COLOR is replaced at runtime with the panel's text color. -->
+  <defs>
+    <mask id="cut">
+      <rect x="0" y="0" width="70" height="70" fill="#fff"/>
+      <path d="M51 29 C50 37 46.5 41.5 41 43 C37 44 33 43 30.5 41.2 C37 38.8 44.5 34.5 51 29 Z" fill="#000"/>
+      <path d="M43.5 24 C38 27.5 31.5 31.5 25.5 35.4 C31 36.6 38.5 33.4 42.8 29.6 C45 27.7 45.3 25.5 43.5 24 Z" fill="#000"/>
+      <circle cx="46" cy="15.2" r="2.6" fill="#000"/>
+    </mask>
+  </defs>
+  <g fill="COLOR" mask="url(#cut)">
+    <path d="M19.5 32 L28.5 41 L10.5 58 C8 60.4 3.6 58 4.8 55 Z"/>
+    <path d="M51 13 C47.5 6 37.5 6.6 35.4 14 C33 22 27 28.6 19 34.5 L25.5 42 C32 46 40 46.5 45.5 42 C51.5 37 53.4 29.6 52.6 21.2 Z"/>
+    <path d="M50.4 12.8 L62 18 L51 22.6 Z"/>
+  </g>
+</svg>

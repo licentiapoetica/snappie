@@ -236,7 +236,7 @@ class _Resized(Exception):
 
 
 class FakeInput:
-    """Pointer moves and wheel steps through KWin's fake input (`screenrec-cast input`)."""
+    """Pointer moves and wheel steps through KWin's fake input (`snappie-cast input`)."""
 
     def __init__(self):
         from .cast import HELPER
@@ -326,7 +326,7 @@ class ScrollCapture(QObject):
             try:
                 self.input = FakeInput()
             except (OSError, RuntimeError) as e:
-                print("screenrec: no fake input, scroll yourself:", e)
+                print("snappie: no fake input, scroll yourself:", e)
                 self.manual = True
             self.cast = CastStream(window_args(self.win["id"], POINTER_HIDDEN),
                                    self._on_node, self._on_closed, self._on_error)
@@ -512,7 +512,7 @@ class ScrollCapture(QObject):
                 # moved too far to find the overlap (or something odd): go back, smaller steps
                 fails += 1
                 if fails > 3:
-                    print("screenrec: scrolling capture lost track of the page, stopping")
+                    print("snappie: scrolling capture lost track of the page, stopping")
                     break
                 self.input.scroll(-notches)
                 yield self._settled()

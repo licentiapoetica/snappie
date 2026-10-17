@@ -651,7 +651,7 @@ class EditorWindow(QMainWindow):
         self.zoom_label.setText(f"{self.display_zoom() * 100:.0f} %")
         name = os.path.basename(self.path) if self.path else "Screenshot"
         dirty = " *" if self.doc.revision != self._used else ""
-        self.setWindowTitle(f"{name}{dirty} — screenrec editor")
+        self.setWindowTitle(f"{name}{dirty} — Snappie")
 
     # -- zoom --
 

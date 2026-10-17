@@ -113,9 +113,9 @@ class Recorder:
             desc.append(f" ! {GPU_CONVERT} ! {enc} ! queue ! mux.")
         sources = []
         if system_audio:
-            sources.append("pulsesrc device=@DEFAULT_MONITOR@ client-name=screenrec")
+            sources.append("pulsesrc device=@DEFAULT_MONITOR@ client-name=snappie")
         if mic:
-            sources.append("pulsesrc device=@DEFAULT_SOURCE@ client-name=screenrec-mic")
+            sources.append("pulsesrc device=@DEFAULT_SOURCE@ client-name=snappie-mic")
         if len(sources) == 1:
             desc.append(f" {sources[0]} ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2"
                         " ! queue ! opusenc bitrate=192000 ! queue ! mux.")
@@ -125,7 +125,7 @@ class Recorder:
             for s in sources:
                 desc.append(f" {s} ! audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2"
                             " ! queue ! amix.")
-        desc.append(f" matroskamux name=mux writing-app=screenrec ! filesink location=\"{path}\"")
+        desc.append(f" matroskamux name=mux writing-app=snappie ! filesink location=\"{path}\"")
 
         self.pipeline = Gst.parse_launch("".join(desc))
         self.pipeline.use_clock(Gst.SystemClock.obtain())

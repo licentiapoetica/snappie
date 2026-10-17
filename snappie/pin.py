@@ -27,7 +27,7 @@ class PinWindow(QWidget):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)   # for the opacity setting
-        self.caption = f"screenrec — pin {next(_ids)}"
+        self.caption = f"Snappie — pin {next(_ids)}"
         self.setWindowTitle(self.caption)
         self.image = image
         self.kwin = kwin

@@ -1,7 +1,7 @@
 """The running app: tray icon, commands, and the capture flows.
 
-One process owns the D-Bus name; later `screenrec <command>` invocations (hotkeys,
-launcher, terminal) forward their command line to it.  Started as `screenrec tray`
+One process owns the D-Bus name; later `snappie <command>` invocations (hotkeys,
+launcher, terminal) forward their command line to it.  Started as `snappie tray`
 it stays in the tray; started by any other command it is a one-shot that quits
 once nothing is left open (it lingers while it still serves a copied image, since
 on Wayland the clipboard data lives in the process that copied it).
@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from . import a11y, cast, cli, settings
 from .app_util import Notifier, copy_image, copy_text, log, save_image
 
-ICON = "applets-screenshooter"
+ICON = "snappie"
 CLIPBOARD_LINGER = 3600   # one-shot: serve a copied image for at most this long
 
 
@@ -54,7 +54,7 @@ class App(QObject):
     # ------------------------------------------------------------------ commands
 
     def command(self, argv):
-        """Run a command line (ours, or forwarded from another `screenrec`). Returns reply text."""
+        """Run a command line (ours, or forwarded from another `snappie`). Returns reply text."""
         try:
             ns = cli.parse(argv)
         except cli.ArgError as e:
@@ -110,7 +110,7 @@ class App(QObject):
                 return
         except Exception as e:
             log("error:", e)
-            self.notifier.notify("screenrec", str(e), icon="dialog-error")
+            self.notifier.notify("Snappie", str(e), icon="dialog-error")
         self.idle_check()
 
     # ------------------------------------------------------------------ lifetime
@@ -178,7 +178,8 @@ class App(QObject):
         if self.tray or not QSystemTrayIcon.isSystemTrayAvailable():
             self._update_tray()
             return
-        self.tray = QSystemTrayIcon(_icon(ICON, "camera-photo"))
+        from .icons import tray_icon
+        self.tray = QSystemTrayIcon(tray_icon())
         self.tray.activated.connect(self._tray_activated)
         self._update_tray()
         self.tray.show()
@@ -214,7 +215,8 @@ class App(QObject):
 
         rec = self.recording
         if rec:
-            self.tray.setIcon(_icon("media-playback-pause" if rec.paused else "media-record"))
+            from .icons import tray_icon
+            self.tray.setIcon(tray_icon("paused" if rec.paused else "recording"))
             self.tray.setToolTip(f"{rec.describe()} — click to stop")
             add("Stop recording", ["stop"], "media-playback-stop")
             add("Resume" if rec.paused else "Pause", ["pause"],
@@ -222,8 +224,9 @@ class App(QObject):
             add("Draw on the recording", ["draw"], "draw-freehand")
             menu.addSeparator()
         else:
-            self.tray.setIcon(_icon(ICON, "camera-photo"))
-            self.tray.setToolTip("screenrec — click: screenshot · middle click: record")
+            from .icons import tray_icon
+            self.tray.setIcon(tray_icon())
+            self.tray.setToolTip("Snappie — click: screenshot · middle click: record")
         add("Screenshot…", ["shot"], "camera-photo", not rec)
         add("Screenshot of the screen", ["shot", "--screen"], "view-fullscreen")
         add("Screenshot of the active window", ["shot", "--window"], "window")
@@ -316,7 +319,7 @@ class App(QObject):
                 on_pick(sel)
             except Exception as e:
                 log("error:", e)
-                self.notifier.notify("screenrec", str(e), icon="dialog-error")
+                self.notifier.notify("Snappie", str(e), icon="dialog-error")
         self.idle_check()
 
     def remember_selection(self, sel):
@@ -872,7 +875,7 @@ def _copy_file(path):
     QApplication.clipboard().setMimeData(mime)
 
 
-AUTOSTART = os.path.join(settings.CONFIG_DIR, "..", "autostart", "screenrec.desktop")
+AUTOSTART = os.path.join(settings.CONFIG_DIR, "..", "autostart", "snappie.desktop")
 
 
 def _autostart_enabled():
@@ -885,7 +888,7 @@ def _set_autostart(on):
     if on:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
-            f.write("[Desktop Entry]\nType=Application\nName=screenrec\n"
+            f.write("[Desktop Entry]\nType=Application\nName=snappie\n"
                     f"Exec={launcher()} tray\nIcon={ICON}\nX-KDE-autostart-phase=2\nNoDisplay=true\n")
     elif os.path.exists(path):
         os.unlink(path)

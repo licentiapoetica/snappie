@@ -156,7 +156,7 @@ class Picker(QObject):
                 cx, cy, cw, ch = w["client"]
                 seg.chain_at(cx + cw // 2, cy + ch // 2, w["client"])  # warm the cache here, not in the UI
             except Exception as e:
-                print("screenrec: window capture failed:", e)
+                print("snappie: window capture failed:", e)
                 seg = None
             with self._cond:
                 self._segmenters[w["id"]] = seg
@@ -424,7 +424,7 @@ class Overlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
-        self.setWindowTitle("screenrec picker")
+        self.setWindowTitle("snappie picker")
         self.f_text = QFont(self.font())
         self.f_text.setPointSizeF(self.font().pointSizeF() + 0.5)
         self.f_bold = QFont(self.f_text)

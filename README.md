@@ -1,33 +1,35 @@
-# screenrec
+<p align="center"><img src="snappie/icons/snappie.svg" width="128" alt="Snappie logo: a magpie"></p>
 
-Screenshots, annotation, screen recording and sharing for KDE Plasma 6 on
+# Snappie
+
+*Snap it like a magpie.* Screenshots, annotation, screen recording and sharing for KDE Plasma 6 on
 Wayland, like ShareX on Windows. Pick a screen, a window, or a part of a
 window (a panel, a terminal pane, a browser tab's page area, …), then annotate,
 copy, save, upload, pin or record it. There's no screen-share dialog.
 
 ```sh
-./install.sh          # puts `screenrec` on PATH, launcher + shortcut entries, autostart
-screenrec             # starts the tray app
-screenrec --help      # all commands
+./install.sh          # puts `snappie` on PATH, launcher + shortcut entries, autostart
+snappie               # starts the tray app
+snappie --help        # all commands
 ```
 
 ## Tray and shortcuts
 
-`screenrec` runs in the tray. Click: screenshot. Middle click: record. Right
+`snappie` runs in the tray. Click: screenshot. Middle click: record. Right
 click: everything else (delays, last area, GIF, OCR, color picker, scrolling
 capture, history, settings, start with Plasma).
 
 Every action is also a command, and a global shortcut you can assign in
-**System Settings → Shortcuts → screenrec** (none are set by default):
+**System Settings → Shortcuts → snappie** (none are set by default):
 
 | command                     | does                                                  |
 |-----------------------------|-------------------------------------------------------|
-| `screenrec shot`            | screenshot: pick an area                              |
+| `snappie shot`            | screenshot: pick an area                              |
 | `shot --screen / --window`  | the screen under the cursor / the active window       |
 | `shot --last`               | the same area again (follows the window if it moved)  |
 | `shot --delay 5`            | countdown first (for menus and tooltips)             |
 | `shot --then copy,save,…`   | skip the editor: copy, save, upload, pin, ocr, edit   |
-| `screenrec record`          | record an area; run again to stop                     |
+| `snappie record`          | record an area; run again to stop                     |
 | `record --gif` / `--webp`   | record an animated GIF / WebP                         |
 | `record --last`             | record the same area again                            |
 | `pause`, `draw`, `stop`     | control the running recording                         |
@@ -72,7 +74,7 @@ corners, shadow).
 
 ## After capture
 
-Copy, save (`~/Pictures/screenrec`), upload, pin to the screen (always on top;
+Copy, save (`~/Pictures/Snappie`), upload, pin to the screen (always on top;
 wheel zooms), and OCR. Pick the defaults in Settings. Every capture lands in the
 **history**, which shows thumbnails and lets you open, copy, upload, edit, pin
 or delete.
@@ -91,8 +93,8 @@ While recording, a small bar sits under the area: timer, pause, draw, stop.
   clicks as ripples and pressed keys as a bubble. It reads the input devices,
   so your user must be in the `input` group.
 
-Stop with the bar, the tray icon, Ctrl+C, or `screenrec stop`. Files go to
-`~/Videos/screenrec/`.
+Stop with the bar, the tray icon, Ctrl+C, or `snappie stop`. Files go to
+`~/Videos/Snappie/`.
 
 ## Capture
 
@@ -137,6 +139,13 @@ There are two ways to find what's inside a window:
 
 ## Files
 
-Settings: `~/.config/screenrec/settings.json`; uploaders:
-`~/.config/screenrec/uploaders/`; history and thumbnails:
-`~/.local/share/screenrec/`.
+Settings: `~/.config/snappie/settings.json`; uploaders:
+`~/.config/snappie/uploaders/`; history and thumbnails:
+`~/.local/share/snappie/`.
+
+Coming from the old name (`screenrec`)? The first start of Snappie moves your
+settings, uploaders, history and shortcuts over and removes the old entries.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

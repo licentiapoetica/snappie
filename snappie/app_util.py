@@ -7,12 +7,12 @@ import dbus
 
 
 LOG_FILE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
-                        "screenrec", "screenrec.log")
+                        "snappie", "snappie.log")
 
 
 def log(*a):
     """To stderr and to LOG_FILE (kept small), so problems can be looked at afterwards."""
-    print("screenrec:", *a, file=sys.stderr, flush=True)
+    print("snappie:", *a, file=sys.stderr, flush=True)
     try:
         import time
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
@@ -55,7 +55,7 @@ class Notifier:
             flat += ["default", ""]
             handlers["default"] = actions[0][1]
         try:
-            nid = self._obj.Notify("screenrec", dbus.UInt32(0), icon, title, body,
+            nid = self._obj.Notify("Snappie", dbus.UInt32(0), icon, title, body,
                                    dbus.Array(flat, signature="s"), dbus.Dictionary(hints, signature="sv"),
                                    timeout, dbus_interface="org.freedesktop.Notifications")
             if handlers:

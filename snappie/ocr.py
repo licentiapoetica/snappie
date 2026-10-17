@@ -66,7 +66,7 @@ def recognize(img, lang=None):
         raise OcrError(install_hint(lang))
     if img is None or img.isNull():
         raise OcrError("Nothing to recognize (empty image)")
-    with tempfile.TemporaryDirectory(prefix="screenrec-ocr-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="snappie-ocr-") as tmp:
         src = os.path.join(tmp, "in.png")
         if not _prepare(img).save(src, "PNG"):
             raise OcrError("Can't write the temporary image")

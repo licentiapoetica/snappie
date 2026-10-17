@@ -1,4 +1,4 @@
-"""User settings (JSON in ~/.config/screenrec/settings.json) and standard paths.
+"""User settings (JSON in ~/.config/snappie/settings.json) and standard paths.
 
 Keys are flat, dotted names.  `get` falls back to DEFAULTS, so new keys need no
 migration.  Writes are merged into the file, so two processes changing
@@ -10,8 +10,8 @@ import os
 import subprocess
 import time
 
-CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "screenrec")
-DATA_DIR = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "screenrec")
+CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "snappie")
+DATA_DIR = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "snappie")
 SETTINGS = os.path.join(CONFIG_DIR, "settings.json")
 UPLOADERS_DIR = os.path.join(CONFIG_DIR, "uploaders")    # imported ShareX .sxcu files
 HISTORY_FILE = os.path.join(DATA_DIR, "history.jsonl")
@@ -19,7 +19,7 @@ THUMBS_DIR = os.path.join(DATA_DIR, "thumbs")
 
 DEFAULTS = {
     # -- screenshots --
-    "shot.dir": "",                       # "" = <Pictures>/screenrec
+    "shot.dir": "",                       # "" = <Pictures>/snappie
     "shot.filename": "screenshot_%Y-%m-%d_%H-%M-%S",   # strftime pattern, no extension
     "shot.format": "png",                 # png | jpg | webp
     "shot.quality": 92,                   # jpg / webp quality
@@ -31,8 +31,8 @@ DEFAULTS = {
     "shot.magnifier": True,               # pixel loupe next to the cursor while picking
 
     # -- recording --
-    "rec.dir": "",                        # "" = <Videos>/screenrec
-    "rec.filename": "screenrec_%Y-%m-%d_%H-%M-%S",
+    "rec.dir": "",                        # "" = <Videos>/snappie
+    "rec.filename": "snappie_%Y-%m-%d_%H-%M-%S",
     "rec.codec": "hevc",                  # hevc | av1 | h264
     "rec.quality": "good",                # high | good | small
     "rec.fps": 0,                         # 0 = native / variable
@@ -127,12 +127,12 @@ def _xdg_dir(kind, fallback):
 
 def pictures_dir():
     d = get("shot.dir")
-    return os.path.expanduser(d) if d else os.path.join(_xdg_dir("PICTURES", "~/Pictures"), "screenrec")
+    return os.path.expanduser(d) if d else os.path.join(_xdg_dir("PICTURES", "~/Pictures"), "Snappie")
 
 
 def videos_dir():
     d = get("rec.dir")
-    return os.path.expanduser(d) if d else os.path.join(_xdg_dir("VIDEOS", "~/Videos"), "screenrec")
+    return os.path.expanduser(d) if d else os.path.join(_xdg_dir("VIDEOS", "~/Videos"), "Snappie")
 
 
 def unique_path(directory, pattern, ext):

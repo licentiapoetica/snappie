@@ -116,7 +116,7 @@ class Recording:
         if self.opts.get("clicks") or self.opts.get("keys"):
             self._start_visualizer()
         log(f"recording → {self.path}")
-        log("stop with: the bar's ■ button · tray icon · Ctrl+C · `screenrec stop`")
+        log("stop with: the bar's ■ button · tray icon · Ctrl+C · `snappie stop`")
         if self.opts.get("duration"):
             GLib.timeout_add(int(self.opts["duration"] * 1000), lambda: self.stop() or False)
 

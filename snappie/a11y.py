@@ -88,7 +88,7 @@ class Inspector:
         if self.usable:
             Atspi.set_timeout(400, 2000)
         else:
-            print("screenrec: accessibility bus unreachable, finding inner areas from pixels only")
+            print("snappie: accessibility bus unreachable, finding inner areas from pixels only")
 
     def _app_index(self, want_pid=None):
         stale = want_pid is not None and want_pid not in (self._apps or {}) \

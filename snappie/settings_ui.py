@@ -121,7 +121,7 @@ def _tilde(path):
     return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
 
 
-def _default_dir(kind, fallback, sub="screenrec"):
+def _default_dir(kind, fallback, sub="Snappie"):
     return os.path.join(settings._xdg_dir(kind, fallback), sub)
 
 
@@ -165,21 +165,21 @@ def test_image():
     f.setBold(True)
     p.setFont(f)
     p.setPen(style.TEXT)
-    p.drawText(28, 54, "screenrec test upload")
+    p.drawText(28, 54, "snappie test upload")
     f.setPixelSize(16)
     f.setBold(False)
     p.setFont(f)
     p.setPen(style.MUTED)
     p.drawText(28, 86, time.strftime("%Y-%m-%d %H:%M:%S"))
     p.end()
-    fd, path = tempfile.mkstemp(prefix="screenrec-test-", suffix=".png")
+    fd, path = tempfile.mkstemp(prefix="snappie-test-", suffix=".png")
     os.close(fd)
     img.save(path)
     return path
 
 
 class SettingsDialog(QDialog):
-    TITLE = "screenrec — settings"
+    TITLE = "Snappie — settings"
 
     def __init__(self, hotkeys=None, parent=None):
         super().__init__(parent)
@@ -419,7 +419,7 @@ class SettingsDialog(QDialog):
         page = QWidget()
         v = QVBoxLayout(page)
         if self.hotkeys is None:
-            v.addWidget(_hint("Global shortcuts belong to the running screenrec tray app. Start it and "
+            v.addWidget(_hint("Global shortcuts belong to the running snappie tray app. Start it and "
                               "open Settings from its menu to see them here, or set them in System Settings "
                               "→ Keyboard → Shortcuts."))
             b = QPushButton(QIcon.fromTheme("preferences-desktop-keyboard"), "Open System Settings…")

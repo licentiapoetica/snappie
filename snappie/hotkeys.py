@@ -1,8 +1,8 @@
 """Global shortcuts through KDE's own mechanism.
 
-Every action is a [Desktop Action] in screenrec.desktop, linked into
+Every action is a [Desktop Action] in snappie.desktop, linked into
 ~/.local/share/kglobalaccel/ so it appears under System Settings → Shortcuts →
-screenrec.  KDE runs the action's command line when its key is pressed, even when
+snappie.  KDE runs the action's command line when its key is pressed, even when
 the tray app isn't running; when it is, the command is forwarded to it over
 D-Bus (fast path in __main__).  No keys are assigned by default.
 """
@@ -13,7 +13,7 @@ import subprocess
 
 import dbus
 
-APP_ID = "screenrec"
+APP_ID = "snappie"
 COMPONENT = f"{APP_ID}.desktop"
 APPS_DIR = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "applications")
 ACCEL_DIR = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "kglobalaccel")
@@ -40,23 +40,23 @@ ACTIONS = [
 
 
 def launcher():
-    """The command KDE should run: the installed `screenrec`, else this checkout's script."""
-    found = shutil.which("screenrec")
+    """The command KDE should run: the installed `snappie`, else this checkout's script."""
+    found = shutil.which("snappie")
     if found:
         return found
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(here, "screenrec.sh")
+    return os.path.join(here, "snappie.sh")
 
 
 def desktop_entry(exe):
     lines = [
         "[Desktop Entry]",
         "Type=Application",
-        "Name=screenrec",
+        "Name=Snappie",
         "GenericName=Screenshots and Screen Recording",
         "Comment=Capture, annotate, record and share your screen",
         f"Exec={exe}",
-        "Icon=applets-screenshooter",
+        "Icon=snappie",
         "Categories=Utility;Graphics;AudioVideo;Recorder;",
         "Keywords=screenshot;screen;record;capture;gif;annotate;ocr;color;",
         "StartupNotify=false",
@@ -74,6 +74,11 @@ def install(exe=None):
     """Write the .desktop file (launcher + shortcut actions) and register the actions with
     KDE. Returns True if the file changed."""
     text = desktop_entry(exe or launcher())
+    try:
+        from . import icons
+        icons.install()
+    except OSError:
+        pass
     try:
         with open(DESKTOP) as f:
             if f.read() == text and os.path.islink(os.path.join(ACCEL_DIR, COMPONENT)):
@@ -102,8 +107,8 @@ def register(bus=None):
     try:
         bus = bus or dbus.SessionBus()
         accel = dbus.Interface(bus.get_object("org.kde.kglobalaccel", "/kglobalaccel"), "org.kde.KGlobalAccel")
-        for aid, label in [("_launch", "screenrec")] + [(a, l) for a, l, _ in ACTIONS]:
-            action = [COMPONENT, aid, "screenrec", label]
+        for aid, label in [("_launch", "Snappie")] + [(a, l) for a, l, _ in ACTIONS]:
+            action = [COMPONENT, aid, "Snappie", label]
             accel.doRegister(action)
             # SetPresent with autoloading: keys the user stored win over the (empty) default
             accel.setShortcutKeys(action, dbus.Array([], signature="(ai)"), dbus.UInt32(0x2))
@@ -145,7 +150,7 @@ class Hotkeys:
             keys = ""
             if accel is not None:
                 try:
-                    keys = _keys_text(accel.shortcutKeys([COMPONENT, aid, "screenrec", label]))
+                    keys = _keys_text(accel.shortcutKeys([COMPONENT, aid, "Snappie", label]))
                 except dbus.DBusException:
                     pass
             out.append((aid, label, keys))
