@@ -35,6 +35,88 @@ class UploadError(Exception):
     pass
 
 
+class UntrustedCertificate(UploadError):
+    """The server's TLS certificate isn't trusted (self-signed, private CA). `fingerprint` is the
+    SHA-256 of the certificate the server presented; trust_certificate() pins it."""
+
+    def __init__(self, host, port, fingerprint):
+        self.host, self.port, self.fingerprint = host, port, fingerprint
+        where = host if port == 443 else f"{host}:{port}"
+        super().__init__(f"{where} has a certificate that isn't trusted (self-signed?)."
+                         + (f" SHA-256 fingerprint: {pretty_fingerprint(fingerprint)}" if fingerprint else ""))
+
+
+# -- trusted (pinned) certificates -------------------------------------------
+#
+# A trusted server is reached through a connection that accepts exactly the pinned
+# certificate (urllib3's assert_fingerprint) instead of checking it against the system
+# CAs. Everything else, including redirects to other hosts, is verified normally.
+
+def _trusted():
+    t = settings.get("upload.trusted_certs") or {}
+    return t if isinstance(t, dict) else {}
+
+
+def trust_certificate(host, port, fingerprint):
+    settings.set("upload.trusted_certs", dict(_trusted(), **{f"{host}:{port}": fingerprint.lower()}))
+
+
+def untrust_certificate(host, port):
+    t = _trusted()
+    t.pop(f"{host}:{port}", None)
+    settings.set("upload.trusted_certs", t)
+
+
+def pretty_fingerprint(fp):
+    fp = fp.upper()
+    return ":".join(fp[i:i + 2] for i in range(0, len(fp), 2))
+
+
+def server_fingerprint(host, port, timeout=10):
+    """SHA-256 of the certificate the server presents (not verified; for showing / pinning)."""
+    import hashlib
+    import socket
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        with ctx.wrap_socket(sock, server_hostname=host) as tls:
+            return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+
+
+def _host_port(url):
+    from urllib.parse import urlsplit
+    u = urlsplit(url)
+    return (u.hostname or "").lower(), u.port or (443 if u.scheme == "https" else 80)
+
+
+def _pinned_session(host, port, fingerprint):
+    import requests
+    from requests.adapters import HTTPAdapter
+
+    class Pinned(HTTPAdapter):
+        """Accepts only the pinned certificate, whatever `verify` says."""
+        def build_connection_pool_key_attributes(self, request, verify, cert=None):
+            host_params, pool_kwargs = super().build_connection_pool_key_attributes(request, verify, cert)
+            pool_kwargs.update(cert_reqs="CERT_NONE", assert_fingerprint=fingerprint)
+            for k in ("ca_certs", "ca_cert_dir"):
+                pool_kwargs.pop(k, None)
+            return host_params, pool_kwargs
+
+        def cert_verify(self, conn, url, verify, cert):
+            super().cert_verify(conn, url, False, cert)
+            conn.cert_reqs = "CERT_NONE"
+            conn.assert_fingerprint = fingerprint
+
+    sess = requests.Session()
+    adapter = Pinned()
+    sess.mount(f"https://{host}:{port}/", adapter)
+    if port == 443:
+        sess.mount(f"https://{host}/", adapter)
+    return sess
+
+
 class UploadResult:
     def __init__(self, url, delete_url="", thumbnail_url="", response=""):
         self.url = url
@@ -488,9 +570,25 @@ def upload(path, uploader=None, session=None):
         raise UploadError(f"Can't read {path}: {e.strerror}") from None
 
     http = session or requests
+    host, port = _host_port(url)
+    pinned = _trusted().get(f"{host}:{port}") if url.lower().startswith("https:") else None
+    if pinned and session is None:
+        http = _pinned_session(host, port, pinned)
     try:
         resp = http.request(method, url, params=params or None, headers=headers, timeout=TIMEOUT,
                             allow_redirects=cfg["_follow_redirects"], **kw)
+    except requests.exceptions.SSLError as e:
+        if pinned or "CERTIFICATE_VERIFY_FAILED" in str(e) or "fingerprint" in str(e).lower():
+            try:
+                fp = server_fingerprint(host, port)
+            except OSError:
+                fp = ""
+            if pinned and fp and fp != pinned:
+                raise UploadError(f"The certificate of {host} changed since you trusted it. If you expected "
+                                  f"that, remove the old exception in Settings → Uploads. New SHA-256: "
+                                  f"{pretty_fingerprint(fp)}") from None
+            raise UntrustedCertificate(host, port, fp) from None
+        raise UploadError(f"Secure connection to {_host(url)} failed: {_reason(e)}") from None
     except requests.exceptions.Timeout:
         raise UploadError(f"{_host(url)} did not answer in time") from None
     except requests.exceptions.ConnectionError as e:
@@ -547,10 +645,12 @@ class Uploader(QObject):
         threading.Thread(target=self._work, args=(path, uploader), daemon=True).start()
 
     def _work(self, path, uploader):
+        self.error = None
         try:
             res, err = upload(path, uploader), ""
         except UploadError as e:
             res, err = None, str(e)
+            self.error = e       # e.g. UntrustedCertificate: the caller can offer to trust it
         except Exception as e:  # noqa: BLE001 - never leave the caller waiting
             res, err = None, f"Upload failed: {e}"
         self._done.emit(res, err)

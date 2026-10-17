@@ -657,7 +657,14 @@ class App(QObject):
 
         def done(result, error):
             self.jobs -= 1
-            if result is None:
+            err = getattr(up, "error", None)
+            if result is None and isinstance(err, upload.UntrustedCertificate) and err.fingerprint:
+                def trust_and_retry():
+                    upload.trust_certificate(err.host, err.port, err.fingerprint)
+                    self.upload(path)
+                self.notifier.notify("Upload blocked: untrusted certificate", str(err), icon="security-low",
+                                     actions=[("Trust certificate & retry", trust_and_retry)], timeout=0)
+            elif result is None:
                 self.notifier.notify("Upload failed", error or "unknown error", icon="dialog-error")
             else:
                 if settings.get("upload.copy_url"):

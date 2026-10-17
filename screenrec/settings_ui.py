@@ -390,9 +390,13 @@ class SettingsDialog(QDialog):
         self.b_test = QPushButton(QIcon.fromTheme("cloud-upload"), "Test Upload")
         self.b_test.setToolTip("Uploads a small generated image with the selected uploader")
         self.b_test.clicked.connect(self._test_upload)
+        b_certs = QPushButton(QIcon.fromTheme("security-medium"), "Trusted Certificates…")
+        b_certs.setToolTip("Self-signed certificates you allowed for upload servers")
+        b_certs.clicked.connect(self._trusted_certs)
         for b in (b_import, self.b_default, self.b_remove):
             col.addWidget(b)
         col.addStretch(1)
+        col.addWidget(b_certs)
         col.addWidget(self.b_test)
         h.addLayout(col)
         v.addWidget(box, 1)
@@ -589,6 +593,9 @@ class SettingsDialog(QDialog):
             self._default_uploader = ""
         self._refresh_uploaders()
 
+    def _trusted_certs(self):
+        TrustedCertsDialog(self).exec()
+
     def _test_upload(self):
         name = self._selected_uploader()
         if not name or self._uploader is not None:
@@ -606,8 +613,12 @@ class SettingsDialog(QDialog):
             os.remove(path)
         except OSError:
             pass
+        error = getattr(self._uploader, "error", None)
         self._uploader = None
         self._uploader_selected()
+        if isinstance(error, upload.UntrustedCertificate) and ask_trust(self, error):
+            self._test_upload()
+            return
         if res is None:
             self.test_result.setStyleSheet(f"color: {style.RECORD.name()};")
             self.test_result.setText(f"Test upload failed: {err}")
@@ -617,3 +628,62 @@ class SettingsDialog(QDialog):
             return f'<a href="{u}">{u}</a>'
         extra = f"<br>Deletion URL: {link(res.delete_url)}" if res.delete_url else ""
         self.test_result.setText(f"Uploaded: {link(res.url)}{extra}")
+
+
+def ask_trust(parent, error):
+    """Ask whether to trust a server's self-signed certificate (pins it). True if trusted."""
+    where = error.host if error.port == 443 else f"{error.host}:{error.port}"
+    box = QMessageBox(QMessageBox.Icon.Warning, "Untrusted certificate",
+                      f"<b>{html.escape(where)}</b> uses a certificate that isn't signed by a trusted "
+                      "authority — usually a self-signed certificate on your own server.", parent=parent)
+    box.setInformativeText(
+        "Only trust it if this is your server and the fingerprint is the one it should have. "
+        "Uploads will then accept exactly this certificate for this server (if it ever changes, "
+        "they stop until you trust the new one).<br><br>SHA-256:<br><tt>"
+        + upload.pretty_fingerprint(error.fingerprint) + "</tt>")
+    trust = box.addButton("Trust This Certificate", QMessageBox.ButtonRole.AcceptRole)
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    box.exec()
+    if box.clickedButton() is not trust or not error.fingerprint:
+        return False
+    upload.trust_certificate(error.host, error.port, error.fingerprint)
+    return True
+
+
+class TrustedCertsDialog(QDialog):
+    """Lists pinned self-signed certificates; Remove forgets one."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Trusted certificates")
+        self.resize(640, 300)
+        v = QVBoxLayout(self)
+        self.list = QListWidget()
+        v.addWidget(QLabel("Upload servers whose self-signed certificate you trusted:"))
+        v.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        self.b_remove = QPushButton(QIcon.fromTheme("list-remove"), "Remove")
+        self.b_remove.clicked.connect(self._remove)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        row.addWidget(self.b_remove)
+        row.addStretch(1)
+        row.addWidget(close)
+        v.addLayout(row)
+        self._fill()
+
+    def _fill(self):
+        self.list.clear()
+        for hp, fp in sorted((settings.get("upload.trusted_certs") or {}).items()):
+            item = QListWidgetItem(f"{hp}\n    {upload.pretty_fingerprint(fp)}")
+            item.setData(Qt.ItemDataRole.UserRole, hp)
+            self.list.addItem(item)
+        self.b_remove.setEnabled(self.list.count() > 0)
+
+    def _remove(self):
+        item = self.list.currentItem()
+        if item is None:
+            return
+        host, _, port = item.data(Qt.ItemDataRole.UserRole).rpartition(":")
+        upload.untrust_certificate(host, int(port))
+        self._fill()

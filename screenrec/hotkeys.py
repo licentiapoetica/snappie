@@ -115,6 +115,9 @@ def _keys_text(keys):
     from PyQt6.QtGui import QKeySequence
     out = []
     for seq in keys:
+        # a(ai): every shortcut is a struct holding the key codes of its (up to 4) chords
+        if len(seq) and isinstance(seq[0], (list, tuple, dbus.Array)):
+            seq = seq[0]
         codes = [int(k) for k in seq if int(k)]
         if codes:
             out.append(QKeySequence(*codes).toString(QKeySequence.SequenceFormat.NativeText))
