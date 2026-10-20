@@ -4,6 +4,10 @@
 #   ./install.sh --no-autostart   to skip the autostart entry
 set -e
 here=$(dirname "$(readlink -f "$0")")
+if ! "$here/snappie.sh" deps; then
+    echo "Install the packages above, then run ./install.sh again." >&2
+    exit 1
+fi
 mkdir -p "$HOME/.local/bin"
 ln -sf "$here/snappie.sh" "$HOME/.local/bin/snappie"
 "$here/helper/build.sh" >/dev/null   # capture helper (also built automatically on first run)
@@ -15,6 +19,3 @@ echo "installed:"
 echo "  snappie            start the tray app (also starts with Plasma now)"
 echo "  snappie --help     all commands (shot, record, color, ocr, scroll, …)"
 echo "  Shortcuts: System Settings → Shortcuts → snappie (no keys are set by default)"
-for tool in ffmpeg tesseract; do
-    command -v $tool >/dev/null || echo "  optional: install $tool"
-done

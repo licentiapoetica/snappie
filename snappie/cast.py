@@ -26,7 +26,10 @@ def ensure_helper():
         return
     r = subprocess.run([os.path.join(HELPER_SRC, "build.sh")], capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError("building the capture helper failed (needs gcc, wayland-devel):\n" + r.stderr)
+        from . import deps
+        gone = deps.missing(["compiler", "pkg-config", "wayland"])
+        need = f" ({deps.install_hint(gone)})" if gone else ""
+        raise RuntimeError(f"building the capture helper failed{need}:\n" + r.stderr)
 
 
 def window_args(window_id, pointer):

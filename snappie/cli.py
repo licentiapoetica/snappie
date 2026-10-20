@@ -4,7 +4,7 @@ tray app is running that process only parses, forwards over D-Bus and exits."""
 import argparse
 
 COMMANDS = ["tray", "shot", "record", "stop", "pause", "draw", "color", "ocr", "scroll",
-            "history", "settings", "edit", "pin", "upload", "quit"]
+            "history", "settings", "edit", "pin", "upload", "quit", "deps"]
 
 
 class ArgError(Exception):
@@ -49,6 +49,7 @@ def build_parser():
         p = sub.add_parser(name, help=what)
         p.add_argument("file")
     sub.add_parser("quit", help="quit the tray app")
+    sub.add_parser("deps", help="check what Snappie needs from the system")
     return ap
 
 
