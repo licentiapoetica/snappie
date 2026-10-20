@@ -85,7 +85,8 @@ def main():
     qapp = QApplication(sys.argv[:1])
     qapp.setApplicationName("snappie")
     qapp.setDesktopFileName("snappie")
-    qapp.setApplicationDisplayName("Snappie")
+    # no setApplicationDisplayName: Qt would append " — Snappie" to every window title, and
+    # KWin finds our windows (recording bar, area border, drawing layer, …) by exact title
     from .icons import app_icon
     qapp.setWindowIcon(app_icon())
     qapp.setQuitOnLastWindowClosed(False)
