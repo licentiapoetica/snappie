@@ -4,6 +4,10 @@ Everything under the cursor is shown at once as nested outlines: the selected
 level is the clear, solid one; dashed outlines inside it are the smaller
 areas you can scroll down into.  A breadcrumb bar at the top lists the same
 levels and can be clicked.
+
+F brings a covered window to the front.  Nothing moves on the desktop: the
+picker draws the window from its own stream (correct even when covered) over
+the others, and the app makes the capture match (see App._bring_front).
 """
 
 import threading
@@ -68,18 +72,21 @@ class Level:
 class Selection:
     """rect: global logical area. win: record through that window's own stream
     (unaffected by other windows covering it); None: record the screen area.
-    kind: screen | window | content | element | area | region. color: picked QColor (color mode)."""
+    kind: screen | window | content | element | area | region. color: picked QColor (color mode).
+    front: (window, QImage of its own pixels) when one was brought to the front, else None."""
 
     def __init__(self, rect, win, label, kind="region"):
         self.rect, self.win, self.label, self.kind = rect, win, label, kind
         self.show_cursor = True
         self.window_style = "plain"
         self.color = None
+        self.front = None
 
 
 class Picker(QObject):
     finished = pyqtSignal(object)  # Selection or None
     _segmented = pyqtSignal(str, object)
+    _peeked = pyqtSignal(str, object)
 
     def __init__(self, windows, inspector, own_pid, show_cursor=True, mode="record", backgrounds=None,
                  magnifier=True, window_style="plain"):
@@ -92,10 +99,13 @@ class Picker(QObject):
         self.frozen = mode != "record" and bool(self.backgrounds)
         self.magnifier = magnifier or mode == "color"
         self.window_style = window_style
-        self.windows = [w for w in reversed(windows)  # topmost first
-                        if w["visible"] and (w["normal"] or w["dialog"]) and w["pid"] != own_pid
-                        and w["cls"] != "xwaylandvideobridge"]
+        # topmost first; panels are in it so the window under a panel isn't picked through it
+        self.stack = [w for w in reversed(windows)
+                      if w["visible"] and (w["normal"] or w["dialog"] or w.get("dock"))
+                      and w["pid"] != own_pid and w["cls"] != "xwaylandvideobridge"]
+        self.windows = [w for w in self.stack if not w.get("dock")]
         self.inspector = inspector
+        inspector.begin(windows)
         self.levels = []
         self.level = 1
         self.crumb_hover = None
@@ -113,6 +123,9 @@ class Picker(QObject):
         self._busy = None
         self._cond = threading.Condition()
         self._segmented.connect(self._on_segmented)
+        self.front = None       # the window brought to the front (F)
+        self._peeks = {}        # window id -> its own pixels (QImage) | "pending" | None (failed)
+        self._peeked.connect(self._on_peeked)
         self._timer = QTimer(self, singleShot=True, interval=REFRESH_MS, timeout=self._refresh)
         self._shown = None      # what the overlays currently show (skip repaints when unchanged)
         self.overlays = [Overlay(self, s) for s in QGuiApplication.screens()]
@@ -176,6 +189,70 @@ class Picker(QObject):
             self._pixel_mode[w["id"]] = not self.pixel_mode(w)
             self._refresh()
 
+    # -- bring a covered window to the front --
+
+    def shown_front(self):
+        """(window, QImage) drawn in front of the others, or None (none, or still grabbing)."""
+        img = self._peeks.get(self.front["id"]) if self.front else None
+        return (self.front, img) if img not in (None, "pending") else None
+
+    def _covered(self, w):
+        frame = QRect(*w["frame"])
+        for o in self.stack:
+            if o is w:
+                return False
+            if QRect(*o["frame"]).intersects(frame):
+                return True
+        return False
+
+    def front_target(self):
+        """What F does at the cursor: a window to bring to the front, None to put it back,
+        or False for nothing. First all of the window you point at if it's partly covered,
+        then one deeper each time, then back to normal."""
+        if self.cursor is None or self.mode == "color":
+            return False
+        ws = [w for w in self.stack if not w.get("dock") and QRect(*w["frame"]).contains(self.cursor)]
+        if self.front in ws:
+            i = ws.index(self.front)
+            return ws[i + 1] if i + 1 < len(ws) else None
+        if ws and self._covered(ws[0]):
+            return ws[0]
+        if len(ws) > 1:
+            return ws[1]
+        return None if self.front else False
+
+    def bring_to_front(self):
+        target = self.front_target()
+        if target is False:
+            return
+        self.front = target
+        if target is not None and target["id"] not in self._peeks:
+            self._peeks[target["id"]] = "pending"
+            threading.Thread(target=self._grab_peek, args=(target,), daemon=True).start()
+        self._shown = None
+        self._refresh()
+
+    def _grab_peek(self, w):
+        from .cast import grab_window
+        try:
+            img = grab_window(w["id"])
+        except Exception as e:
+            print("snappie: window capture failed:", e)
+            img = None
+        self._peeked.emit(w["id"], img)
+
+    def _on_peeked(self, wid, img):
+        self._peeks[wid] = img
+        if not self.front or self.front["id"] != wid:
+            return
+        if img is None:
+            self.front = None
+        self._shown = None
+        self._refresh()
+        if img is None:
+            self.status = "can't show this window"
+            self._update()
+
     # -- hierarchy under the cursor --
 
     def _screen_at(self, p):
@@ -185,9 +262,12 @@ class Picker(QObject):
         return QGuiApplication.primaryScreen()
 
     def _window_at(self, p):
-        for w in self.windows:
+        front = self.shown_front()
+        if front and QRect(*front[0]["frame"]).contains(p):
+            return front[0]
+        for w in self.stack:
             if QRect(*w["frame"]).contains(p):
-                return w
+                return None if w.get("dock") else w
         return None
 
     def _inner(self, w, p):
@@ -216,19 +296,19 @@ class Picker(QObject):
         scr = self._screen_at(p)
         g = scr.geometry()
         levels = [Level("screen", "Screen", scr.name(), g)]
-        self.status = None
+        self.status = "bringing to front…" if self.front and self.shown_front() is None else None
         w = self._window_at(p)
         if w:
             levels.append(Level("window", "Window", w["caption"] or w["cls"], QRect(*w["frame"]), w))
             client = QRect(*w["client"])
             if not _near(client, levels[-1].rect):
                 levels.append(Level("content", "Content", "", client, w))
-            bounds = QRect(*w["buffer"]).intersected(g)
             for lv in self._inner(w, p):
-                lv.rect = lv.rect.intersected(bounds)
+                # only the part you can see: inside its parent (scrolled-out list items, shadows)
+                last = levels[-1]
+                lv.rect = lv.rect.intersected(last.rect).intersected(g)
                 if lv.rect.width() < 8 or lv.rect.height() < 8:
                     continue
-                last = levels[-1]
                 if _near(lv.rect, last.rect):
                     # same area: keep the most descriptive name
                     if lv.kind == "element" and (last.kind != "element" or last.title in GENERIC_ROLES
@@ -369,6 +449,13 @@ class Picker(QObject):
 
     def background_at(self, p):
         """(QImage, device-pixel QPoint) under a global logical point, or (None, None)."""
+        front = self.shown_front()
+        if front and QRect(*front[0]["frame"]).contains(p):
+            img, (fx, fy, fw, _) = front[1], front[0]["frame"]
+            s = img.width() / max(1, fw)
+            px = QPoint(min(int((p.x() - fx) * s), img.width() - 1), min(int((p.y() - fy) * s), img.height() - 1))
+            if img.pixelColor(px).alpha() == 255:  # rounded corners: the screen shows through
+                return img, px
         scr = self._screen_at(p)
         img = self.backgrounds.get(scr.name())
         if img is None:
@@ -397,6 +484,7 @@ class Picker(QObject):
         if sel is not None:
             sel.show_cursor = self.show_cursor
             sel.window_style = self.window_style
+            sel.front = self.shown_front()
         with self._cond:
             self._done = True
             self._cond.notify()
@@ -497,6 +585,8 @@ class Overlay(QWidget):
             self.picker.step(-1)
         elif k == Qt.Key.Key_Tab:
             self.picker.toggle_mode()
+        elif k == Qt.Key.Key_F:
+            self.picker.bring_to_front()
         elif k == Qt.Key.Key_C and self.picker.mode == "record":
             self.picker.toggle_cursor()
         elif k == Qt.Key.Key_M and self.picker.backgrounds:
@@ -528,14 +618,17 @@ class Overlay(QWidget):
                 p.setClipping(False)
         else:
             p.fillRect(self.rect(), DIM)
+            if sel is not None:
+                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                p.fillRect(sel.translated(-origin), Qt.GlobalColor.transparent)
+                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
+        front = pk.shown_front()
+        if front is not None:
+            self._draw_front(p, front, sel, origin)
 
         if sel is not None:
             local = sel.translated(-origin)
-            if bg is None:
-                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-                p.fillRect(local, Qt.GlobalColor.transparent)
-                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-
             if pk.drag is None:
                 # the other levels: dashed, brighter for the smaller ones you can scroll into
                 for i, lv in enumerate(pk.levels):
@@ -571,6 +664,20 @@ class Overlay(QWidget):
                     and not self._crumb_bar.contains(pk.cursor - origin):
                 self._draw_loupe(p, pk, pk.cursor - origin)
         p.end()
+
+    def _draw_front(self, p, front, sel, origin):
+        """The window brought to the front: its own pixels over the others, dimmed outside the selection."""
+        w, img = front
+        r = QRect(*w["frame"]).translated(-origin)
+        if not r.intersects(self.rect()):
+            return
+        p.drawImage(QRectF(r), img, QRectF(img.rect()))
+        dim = QRegion(r)
+        if sel is not None:
+            dim = dim.subtracted(QRegion(sel.translated(-origin)))
+        p.setClipRegion(dim)
+        p.fillRect(r, DIM)
+        p.setClipping(False)
 
     def _draw_loupe(self, p, pk, at):
         """Pixel-exact zoom of the frozen screen around the cursor, with its color."""
@@ -708,6 +815,9 @@ class Overlay(QWidget):
                 items.append(("Drag", "free region"))
             if mode:
                 items.append(("Tab", mode))
+            target = pk.front_target()
+            if target is not False:
+                items.append(("F", "bring to front" if target else "put back"))
             if pk.mode == "record":
                 items.append(("C", "record cursor"))
             if pk.mode == "shot" and pk.window_level_selected():

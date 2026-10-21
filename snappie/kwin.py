@@ -28,11 +28,14 @@ var ws = workspace.stackingOrder;
 for (var i = 0; i < ws.length; i++) {
     var w = ws[i];
     var onDesk = w.onAllDesktops || w.desktops.indexOf(workspace.currentDesktop) >= 0;
+    // windows of other activities stay in the stacking order, as do closing ones (fading out)
+    var acts = w.activities || [];
+    var onActivity = acts.length == 0 || acts.indexOf(workspace.currentActivity) >= 0;
     out.push({
         id: w.internalId.toString(), caption: w.caption, cls: w.resourceClass,
-        pid: w.pid, normal: w.normalWindow, dialog: w.dialog, minimized: w.minimized,
+        pid: w.pid, normal: w.normalWindow, dialog: w.dialog, dock: w.dock, minimized: w.minimized,
         active: workspace.activeWindow === w, fullscreen: w.fullScreen,
-        visible: onDesk && !w.minimized && !w.hidden,
+        visible: onDesk && onActivity && !w.minimized && !w.hidden && !w.deleted && w.opacity !== 0,
         frame: rect(w.frameGeometry), client: rect(w.clientGeometry), buffer: rect(w.bufferGeometry)
     });
 }
