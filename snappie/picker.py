@@ -656,13 +656,7 @@ class Overlay(QWidget):
             p.setPen(QPen(ACCENT, 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(local.adjusted(1, 1, -1, -1))
-            if pk.drag is not None:
-                text = "Region"
-            elif pk.levels:
-                text = pk.levels[pk.level].describe()
-            else:
-                text = ""
-            self._draw_tag(p, local, text, f"{round(sel.width() * dpr)} × {round(sel.height() * dpr)}")
+            self._draw_tag(p, local, f"{round(sel.width() * dpr)} × {round(sel.height() * dpr)}")
 
         self._crumbs, self._crumb_bar = [], QRect()
         self._hint_bar = self._cursor_toggle = QRect()
@@ -743,16 +737,15 @@ class Overlay(QWidget):
         p.setPen(TEXT)
         p.drawText(QRect(sw.right() + 8, y + size, box.width(), info_h), Qt.AlignmentFlag.AlignVCenter, text)
 
-    def _draw_tag(self, p, r, text, size):
-        fm, fb = QFontMetrics(self.f_text), QFontMetrics(self.f_bold)
+    def _draw_tag(self, p, r, size):
+        """The selection's size in pixels, above its top-left corner (inside when there's no room)."""
+        fb = QFontMetrics(self.f_bold)
         h = fb.height() + 10
-        avail = max(120, min(r.width() - 12, 700))
-        size_w = fb.horizontalAdvance(size)
-        text = fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0, avail - size_w - 34))
-        w = fb.horizontalAdvance(size) + (fm.horizontalAdvance(text) + 14 if text else 0) + 20
-        x, y = r.left() + 6, r.top() + 6
-        if r.height() < h + 16:  # too small to fit inside: put it above (or below)
-            y = r.top() - h - 4 if r.top() - h - 4 >= 0 else r.bottom() + 4
+        w = fb.horizontalAdvance(size) + 20
+        x, y = r.left(), r.top() - h - 2
+        if y < 0:
+            y = r.top() + 6 if r.height() >= h + 16 else r.bottom() + 4
+            x += 6
         x = min(max(4, x), self.width() - w - 4)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(Qt.PenStyle.NoPen)
@@ -761,9 +754,6 @@ class Overlay(QWidget):
         p.setPen(QColor("#0b1a24"))
         p.setFont(self.f_bold)
         p.drawText(QPoint(x + 10, y + 5 + fb.ascent()), size)
-        if text:
-            p.setFont(self.f_text)
-            p.drawText(QPoint(x + 10 + size_w + 14, y + 5 + fm.ascent()), text)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
     def _draw_crumbs(self, p, pk):
