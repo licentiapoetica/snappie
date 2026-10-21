@@ -10,8 +10,8 @@ on Wayland the clipboard data lives in the process that copied it).
 import os
 import time
 
-from PyQt6.QtCore import QObject, QPoint, QRect, QTimer
-from PyQt6.QtGui import QAction, QGuiApplication, QIcon
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QTimer
+from PyQt6.QtGui import QAction, QGuiApplication, QIcon, QImage, QPainter
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import a11y, cast, cli, settings
@@ -98,7 +98,6 @@ class App(QObject):
             elif c == "edit":
                 self.open_editor(path=os.path.abspath(ns.file))
             elif c == "pin":
-                from PyQt6.QtGui import QImage
                 img = QImage(ns.file)
                 if img.isNull():
                     raise RuntimeError(f"can't open {ns.file}")
@@ -316,11 +315,35 @@ class App(QObject):
             log("cancelled")
         else:
             try:
+                if sel.front:
+                    self._bring_front(sel.front, pk.mode if pk else None)
                 on_pick(sel)
             except Exception as e:
                 log("error:", e)
                 self.notifier.notify("Snappie", str(e), icon="dialog-error")
         self.idle_check()
+
+    def _bring_front(self, front, mode):
+        """The picker showed a covered window in front of the others: make the capture match."""
+        w, img = front
+        if mode in ("record", "scroll"):
+            self.kwin.activate(w["id"])  # live: really raise it (scrolling also needs it under the pointer)
+            return
+        # frozen screens: paint the window's own pixels over them, where the picker showed it
+        frame = QRect(*w["frame"])
+        bgs = dict(self._last_bgs)
+        for scr in QGuiApplication.screens():
+            bg, g = bgs.get(scr.name()), scr.geometry()
+            if bg is None or not g.intersects(frame):
+                continue
+            dpr = bg.devicePixelRatio()
+            bg = bg.convertToFormat(QImage.Format.Format_RGB32)  # a copy painters handle well
+            bg.setDevicePixelRatio(dpr)
+            p = QPainter(bg)
+            p.drawImage(QRectF(frame.translated(-g.topLeft())), img, QRectF(img.rect()))
+            p.end()
+            bgs[scr.name()] = bg
+        self._last_bgs = bgs
 
     def remember_selection(self, sel):
         r = sel.rect
@@ -606,7 +629,6 @@ class App(QObject):
         elif name == "folder" and path:
             _show_in_folder(path)
         elif name == "copy" and path:
-            from PyQt6.QtGui import QImage
             if entry.get("kind") == "image":
                 copy_image(QImage(path))
                 self._clip_until = time.monotonic() + CLIPBOARD_LINGER

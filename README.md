@@ -80,6 +80,7 @@ the cursor is highlighted:
 | Tab               | switch inner detection: accessibility tree ↔ from pixels   |
 | click / Enter     | take the highlighted area                                  |
 | drag              | a free rectangle                                           |
+| F                 | bring a covered window to the front; again: the one behind |
 | M                 | magnifier (pixel loupe with the color under the cursor)    |
 | W                 | screenshots of a whole window: plain / transparent / shadow |
 | C                 | recordings: include the mouse cursor                       |
