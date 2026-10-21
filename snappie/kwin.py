@@ -139,6 +139,29 @@ if (target) target.frameGeometryChanged.connect(function () { last = 0; send(); 
 send();
 """
 
+# Keeps our full-screen overlays (picker, in-place editor) out of the taskbar, which is also what
+# Plasma's "Do Not Disturb while a fullscreen app is focused" watches: without this, every pick
+# turned on Do Not Disturb and swallowed our own "copied / saved / uploaded" notifications.
+_SKIP_JS = r"""
+var pid = %PID%, captions = %CAPTIONS%;
+function skip(w) {
+    if (w.pid != pid) return;
+    if (captions.indexOf(w.caption) < 0) {
+        if (!w.snappieSkipWatched) {
+            w.snappieSkipWatched = true;
+            w.captionChanged.connect(function () { skip(w); });
+        }
+        return;
+    }
+    w.skipTaskbar = true;
+    w.skipSwitcher = true;
+    w.skipPager = true;
+}
+workspace.windowAdded.connect(skip);
+var all = workspace.windowList();
+for (var i = 0; i < all.length; i++) skip(all[i]);
+"""
+
 _ACTIVATE_JS = r"""
 var id = %TARGET%, all = workspace.windowList();
 for (var i = 0; i < all.length; i++)
@@ -190,6 +213,7 @@ class KWin:
         self.on_command = None     # argv -> reply text
         self._placed = {}          # caption -> plugin name
         self._cursor_plugin = None
+        self._skipped = set()      # captions kept off the taskbar (one script for all)
         kwin = bus.get_object("org.kde.KWin", "/Scripting")
         self._load = kwin.get_dbus_method("loadScript", "org.kde.kwin.Scripting")
         self._unload = kwin.get_dbus_method("unloadScript", "org.kde.kwin.Scripting")
@@ -243,6 +267,15 @@ class KWin:
             except dbus.DBusException:
                 pass
 
+    def skip_taskbar(self, caption):
+        """Keep our windows titled `caption` out of the taskbar, pager and Alt+Tab from now on.
+        Call before showing them: the script catches them as KWin adds them."""
+        if caption in self._skipped:
+            return
+        self._skipped.add(caption)
+        self._run_script(_SKIP_JS.replace("%PID%", str(os.getpid()))
+                         .replace("%CAPTIONS%", json.dumps(sorted(self._skipped))), "snappie_skip")
+
     # recording bar (kept for the old call sites)
     def place_controls(self, caption, target_id, rect):
         self.place(caption, rect, target_id, mode="below")
@@ -288,6 +321,12 @@ class KWin:
         for caption in list(self._placed):
             self.unplace(caption)
         self.untrack_cursor()
+        if self._skipped:
+            try:
+                self._unload("snappie_skip")
+            except dbus.DBusException:
+                pass
+            self._skipped.clear()
 
 
 def request_stop(bus):

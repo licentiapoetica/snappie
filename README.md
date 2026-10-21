@@ -71,12 +71,13 @@ the command runs on its own and the process exits when done.
 
 ## Picking
 
-For screenshots, the screen freezes. For recordings, it dims. The thing under
-the cursor is highlighted:
+For screenshots, the screen freezes. For recordings, it dims. The smallest
+area under the cursor is highlighted, and a click takes it. Scroll up for
+bigger ones, or point at the title bar to take the whole window:
 
 | input             | action                                                     |
 |-------------------|------------------------------------------------------------|
-| scroll / ↑ ↓      | go deeper (window → content → areas → …) or back up        |
+| scroll / ↑ ↓      | bigger (area → … → content → window → screen) or smaller   |
 | Tab               | switch inner detection: accessibility tree ↔ from pixels   |
 | click / Enter     | take the highlighted area                                  |
 | drag              | a free rectangle                                           |
