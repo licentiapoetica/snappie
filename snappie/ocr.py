@@ -16,15 +16,6 @@ from PyQt6.QtGui import QColor, QImage, QPainter
 
 from . import settings
 
-# tesseract language code -> openSUSE package suffix (tesseract-ocr-traineddata-<name>)
-_LANG_PACKAGES = {
-    "eng": "english", "deu": "german", "fra": "french", "spa": "spanish", "ita": "italian",
-    "por": "portuguese", "nld": "dutch", "pol": "polish", "rus": "russian", "ukr": "ukrainian",
-    "ces": "czech", "swe": "swedish", "jpn": "japanese", "chi_sim": "chinese_simplified",
-    "chi_tra": "chinese_traditional", "kor": "korean", "osd": "orientation_and_script_detection",
-}
-
-
 class OcrError(Exception):
     pass
 
@@ -33,14 +24,10 @@ def available():
     return shutil.which("tesseract") is not None
 
 
-def _data_packages(lang):
-    return [f"tesseract-ocr-traineddata-{_LANG_PACKAGES.get(code, code)}"
-            for code in (lang or settings.get("ocr.lang") or "eng").split("+")]
-
-
 def install_hint(lang=None):
-    pkgs = ["tesseract-ocr"] + _data_packages(lang)
-    return "Text recognition needs tesseract: sudo zypper install " + " ".join(pkgs)
+    from . import deps
+    return "Text recognition needs tesseract: " + deps.install_hint(
+        ["tesseract"], lang or settings.get("ocr.lang") or "eng")
 
 
 # Pipeline: grayscale + upscale, then tesseract reads the image both as-is and inverted
@@ -188,8 +175,8 @@ def recognize(img, lang=None):
     if errors and not words:
         err = errors[0]
         if "Failed loading language" in err or "Error opening data file" in err:
-            raise OcrError(f"tesseract has no data for “{lang}”: sudo zypper install "
-                           + " ".join(_data_packages(lang)))
+            from . import deps
+            raise OcrError(f"tesseract has no data for “{lang}”: " + deps.tesseract_data_hint(lang))
         raise OcrError("tesseract failed: " + (err.splitlines()[-1] if err else "unknown error"))
     return _layout(words)
 

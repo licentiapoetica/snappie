@@ -46,7 +46,8 @@ def pick_codec(wanted):
             return name
     if have("svtav1enc"):
         return "av1-sw"
-    raise RuntimeError("No usable video encoder (install gstreamer-plugins-bad with VA support)")
+    from . import deps
+    raise RuntimeError(f"No usable video encoder ({deps.install_hint(['encoder'])})")
 
 
 def _encoder_desc(codec, quality, qp, pixels):

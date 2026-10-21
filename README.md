@@ -13,6 +13,32 @@ snappie               # starts the tray app
 snappie --help        # all commands
 ```
 
+## Requirements
+
+KDE Plasma 6 (Wayland), Python 3 with PyQt6, dbus-python, PyGObject, NumPy and
+Requests, GStreamer with the PipeWire, base, good and VA plugins, ffmpeg, and
+gcc + Wayland headers for the capture helper. Optional: tesseract (OCR) and
+python-evdev (clicks and keys in recordings).
+
+`snappie deps` checks all of it and prints the install command for your distro;
+`install.sh` runs it first. On Arch and its derivatives:
+
+```sh
+sudo pacman -S --needed python-pyqt6 qt6-svg python-dbus python-gobject python-numpy \
+    python-requests gstreamer gst-plugin-pipewire gst-plugins-base gst-plugins-good \
+    gst-plugin-va gst-plugins-bad-libs ffmpeg gcc pkgconf wayland
+sudo pacman -S --needed tesseract tesseract-data-eng python-evdev   # optional
+```
+
+On openSUSE:
+
+```sh
+sudo zypper install python3-PyQt6 python3-dbus-python python3-gobject python3-numpy \
+    python3-requests typelib-1_0-Gst-1_0 gstreamer-plugin-pipewire gstreamer-plugins-base \
+    gstreamer-plugins-good gstreamer-plugins-bad ffmpeg gcc pkgconf-pkg-config wayland-devel
+sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evdev   # optional
+```
+
 ## Tray and shortcuts
 
 `snappie` runs in the tray. Click: screenshot. Middle click: record. Right
@@ -34,10 +60,11 @@ Every action is also a command, and a global shortcut you can assign in
 | `record --last`             | record the same area again                            |
 | `pause`, `draw`, `stop`     | control the running recording                         |
 | `color`                     | pick a color, copies its hex code                     |
-| `ocr`                       | pick an area, copies its text (needs `tesseract-ocr`) |
+| `ocr`                       | pick an area, copies its text (needs tesseract)       |
 | `scroll`                    | scrolling capture of a window area                    |
 | `history`, `settings`       | windows                                               |
 | `edit / pin / upload FILE`  | open an image in the editor, pin it, upload it        |
+| `deps`                      | check what is installed, print the install command    |
 
 When the tray app is running, commands are handed to it instantly. Otherwise
 the command runs on its own and the process exits when done.
@@ -100,7 +127,7 @@ Stop with the bar, the tray icon, Ctrl+C, or `snappie stop`. Files go to
 
 The tool records through KWin's own screen-cast API, the same one Spectacle
 uses. A tiny helper binary (`helper/`) is built on first run (needs gcc and
-wayland-devel). It's authorized through a hidden `.desktop` entry, so KWin
+the Wayland headers). It's authorized through a hidden `.desktop` entry, so KWin
 never shows a dialog. The same helper drives the auto-scrolling for scrolling
 capture, through KWin's fake-input protocol.
 

@@ -38,6 +38,20 @@ def _excepthook(kind, value, tb):
 
 
 def main():
+    try:
+        return _main()
+    except (ImportError, ValueError):
+        # a missing package (ValueError: gi.require_version) shows up as a traceback deep in
+        # the imports: name what to install instead
+        from . import deps
+        text, ok = deps.report()
+        if ok:
+            raise
+        print(text, file=sys.stderr)
+        return 1
+
+
+def _main():
     from . import cli
     argv = sys.argv[1:]
     try:
@@ -45,6 +59,9 @@ def main():
     except cli.ArgError as e:
         print(e, file=sys.stderr)
         return 2
+    if ns.cmd == "deps":
+        from . import deps
+        return deps.main()
     if ns.cmd in ("stop", "pause", "draw", "quit"):
         code = _forward(cli.normalize(argv))
         if code is None:
