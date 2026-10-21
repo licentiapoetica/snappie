@@ -92,10 +92,13 @@ class Picker(QObject):
         self.frozen = mode != "record" and bool(self.backgrounds)
         self.magnifier = magnifier or mode == "color"
         self.window_style = window_style
-        self.windows = [w for w in reversed(windows)  # topmost first
-                        if w["visible"] and (w["normal"] or w["dialog"]) and w["pid"] != own_pid
-                        and w["cls"] != "xwaylandvideobridge"]
+        # topmost first; panels are in it so the window under a panel isn't picked through it
+        self.stack = [w for w in reversed(windows)
+                      if w["visible"] and (w["normal"] or w["dialog"] or w.get("dock"))
+                      and w["pid"] != own_pid and w["cls"] != "xwaylandvideobridge"]
+        self.windows = [w for w in self.stack if not w.get("dock")]
         self.inspector = inspector
+        inspector.begin(windows)
         self.levels = []
         self.level = 1
         self.crumb_hover = None
@@ -185,9 +188,9 @@ class Picker(QObject):
         return QGuiApplication.primaryScreen()
 
     def _window_at(self, p):
-        for w in self.windows:
+        for w in self.stack:
             if QRect(*w["frame"]).contains(p):
-                return w
+                return None if w.get("dock") else w
         return None
 
     def _inner(self, w, p):
@@ -223,12 +226,12 @@ class Picker(QObject):
             client = QRect(*w["client"])
             if not _near(client, levels[-1].rect):
                 levels.append(Level("content", "Content", "", client, w))
-            bounds = QRect(*w["buffer"]).intersected(g)
             for lv in self._inner(w, p):
-                lv.rect = lv.rect.intersected(bounds)
+                # only the part you can see: inside its parent (scrolled-out list items, shadows)
+                last = levels[-1]
+                lv.rect = lv.rect.intersected(last.rect).intersected(g)
                 if lv.rect.width() < 8 or lv.rect.height() < 8:
                     continue
-                last = levels[-1]
                 if _near(lv.rect, last.rect):
                     # same area: keep the most descriptive name
                     if lv.kind == "element" and (last.kind != "element" or last.title in GENERIC_ROLES
