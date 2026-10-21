@@ -281,9 +281,10 @@ class App(QObject):
 
     def pick(self, mode, on_pick, frozen=True, show_cursor=None):
         """Show the picker. frozen: grab the screens first and show them still (screenshots)."""
-        from .picker import Picker
+        from .picker import Overlay, Picker
         if self.picker:
             return
+        self.kwin.skip_taskbar(Overlay.TITLE)  # else Plasma's fullscreen Do Not Disturb kicks in
         windows = self.kwin.list_windows()
         bgs = {}
         magnifier = settings.get("shot.magnifier")
@@ -473,6 +474,7 @@ class App(QObject):
                 raise RuntimeError("The screen could not be captured")
             frames = [QRect(*w["frame"]) for w in getattr(self, "_pick_windows", [])
                       if w.get("visible") and (w.get("normal") or w.get("dialog"))]
+            self.kwin.skip_taskbar(InPlaceEditor.TITLE)  # full screen too
             ed = InPlaceEditor(scr, bg, sel.rect.intersected(scr.geometry()), frames)
             self.keep(ed)
             ed.action.connect(lambda name, doc: self._doc_action(name, doc, ed, inplace=True))

@@ -1,9 +1,11 @@
 """Full-screen overlay to interactively pick a screen, window, or inner element.
 
 Everything under the cursor is shown at once as nested outlines: the selected
-level is the clear, solid one; dashed outlines inside it are the smaller
-areas you can scroll down into.  A breadcrumb bar at the top lists the same
-levels and can be clicked.
+level is the clear, solid one, by default the smallest area under the cursor;
+dashed outlines are the other levels you can scroll to.  A breadcrumb bar at
+the top lists the same levels and can be clicked.  The choice sticks while
+the cursor stays in the window: scrolled up to the window, it stays the window;
+at an inner area, it follows that depth counted from the smallest one.
 
 F brings a covered window to the front.  Nothing moves on the desktop: the
 picker draws the window from its own stream (correct even when covered) over
@@ -107,7 +109,8 @@ class Picker(QObject):
         self.inspector = inspector
         inspector.begin(windows)
         self.levels = []
-        self.level = 1
+        self.level = 0
+        self._anchor = ("bottom", 0)   # ("top", index) for screen/window/content, ("bottom", from smallest)
         self.crumb_hover = None
         self.status = None
         self.cursor = None
@@ -301,7 +304,7 @@ class Picker(QObject):
         if w:
             levels.append(Level("window", "Window", w["caption"] or w["cls"], QRect(*w["frame"]), w))
             client = QRect(*w["client"])
-            if not _near(client, levels[-1].rect):
+            if client.contains(p) and not _near(client, levels[-1].rect):  # not on the title bar
                 levels.append(Level("content", "Content", "", client, w))
             for lv in self._inner(w, p):
                 # only the part you can see: inside its parent (scrolled-out list items, shadows)
@@ -320,9 +323,10 @@ class Picker(QObject):
         key = w["id"] if w else ("screen", scr.name())
         if key != self._key:
             self._key = key
-            self.level = self._level_by_key.get(key, 1 if w else 0)
+            self._anchor = self._level_by_key.get(key, ("bottom", 0))
         self.levels = levels
-        self.level = max(0, min(self.level, len(levels) - 1))
+        side, n = self._anchor
+        self.level = max(0, min(n if side == "top" else len(levels) - 1 - n, len(levels) - 1))
         shown = (key, self.level, self.status, tuple((lv.kind, lv.rect.getRect()) for lv in levels))
         if shown != self._shown:      # same highlight as before: the loupe already repainted itself
             self._shown = shown
@@ -415,7 +419,11 @@ class Picker(QObject):
         if not self.levels:
             return
         self.level = max(0, min(i, len(self.levels) - 1))
-        self._level_by_key[self._key] = self.level
+        if self.levels[self.level].kind in ("screen", "window", "content"):
+            self._anchor = ("top", self.level)
+        else:
+            self._anchor = ("bottom", len(self.levels) - 1 - self.level)
+        self._level_by_key[self._key] = self._anchor
         self._update()
 
     def select_current(self):
@@ -505,6 +513,8 @@ def _dashed(color, width=1):
 
 
 class Overlay(QWidget):
+    TITLE = "snappie picker"
+
     def __init__(self, picker, screen):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.picker = picker
@@ -512,7 +522,7 @@ class Overlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
-        self.setWindowTitle("snappie picker")
+        self.setWindowTitle(self.TITLE)
         self.f_text = QFont(self.font())
         self.f_text.setPointSizeF(self.font().pointSizeF() + 0.5)
         self.f_bold = QFont(self.f_text)
@@ -646,13 +656,7 @@ class Overlay(QWidget):
             p.setPen(QPen(ACCENT, 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(local.adjusted(1, 1, -1, -1))
-            if pk.drag is not None:
-                text = "Region"
-            elif pk.levels:
-                text = pk.levels[pk.level].describe()
-            else:
-                text = ""
-            self._draw_tag(p, local, text, f"{round(sel.width() * dpr)} × {round(sel.height() * dpr)}")
+            self._draw_tag(p, local, f"{round(sel.width() * dpr)} × {round(sel.height() * dpr)}")
 
         self._crumbs, self._crumb_bar = [], QRect()
         self._hint_bar = self._cursor_toggle = QRect()
@@ -733,16 +737,15 @@ class Overlay(QWidget):
         p.setPen(TEXT)
         p.drawText(QRect(sw.right() + 8, y + size, box.width(), info_h), Qt.AlignmentFlag.AlignVCenter, text)
 
-    def _draw_tag(self, p, r, text, size):
-        fm, fb = QFontMetrics(self.f_text), QFontMetrics(self.f_bold)
+    def _draw_tag(self, p, r, size):
+        """The selection's size in pixels, above its top-left corner (inside when there's no room)."""
+        fb = QFontMetrics(self.f_bold)
         h = fb.height() + 10
-        avail = max(120, min(r.width() - 12, 700))
-        size_w = fb.horizontalAdvance(size)
-        text = fm.elidedText(text, Qt.TextElideMode.ElideRight, max(0, avail - size_w - 34))
-        w = fb.horizontalAdvance(size) + (fm.horizontalAdvance(text) + 14 if text else 0) + 20
-        x, y = r.left() + 6, r.top() + 6
-        if r.height() < h + 16:  # too small to fit inside: put it above (or below)
-            y = r.top() - h - 4 if r.top() - h - 4 >= 0 else r.bottom() + 4
+        w = fb.horizontalAdvance(size) + 20
+        x, y = r.left(), r.top() - h - 2
+        if y < 0:
+            y = r.top() + 6 if r.height() >= h + 16 else r.bottom() + 4
+            x += 6
         x = min(max(4, x), self.width() - w - 4)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(Qt.PenStyle.NoPen)
@@ -751,9 +754,6 @@ class Overlay(QWidget):
         p.setPen(QColor("#0b1a24"))
         p.setFont(self.f_bold)
         p.drawText(QPoint(x + 10, y + 5 + fb.ascent()), size)
-        if text:
-            p.setFont(self.f_text)
-            p.drawText(QPoint(x + 10 + size_w + 14, y + 5 + fm.ascent()), text)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
     def _draw_crumbs(self, p, pk):
