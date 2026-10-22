@@ -7,6 +7,7 @@ D-Bus method on our own service, so this module also owns that service.
 
 import json
 import os
+import re
 import tempfile
 import time
 
@@ -217,6 +218,8 @@ class KWin:
         kwin = bus.get_object("org.kde.KWin", "/Scripting")
         self._load = kwin.get_dbus_method("loadScript", "org.kde.kwin.Scripting")
         self._unload = kwin.get_dbus_method("unloadScript", "org.kde.kwin.Scripting")
+        self._start_all = kwin.get_dbus_method("start", "org.kde.kwin.Scripting")
+        self._introspect = kwin.get_dbus_method("Introspect", "org.freedesktop.DBus.Introspectable")
 
     def _run_script(self, source, plugin):
         self._unload(plugin)  # leftovers from a crashed run
@@ -224,11 +227,29 @@ class KWin:
         with os.fdopen(fd, "w") as f:
             f.write(source.replace("%SERVICE%", SERVICE).replace("%IFACE%", IFACE))
         try:
-            sid = self._load(path, plugin, signature="ss")
-            self.bus.get_object("org.kde.KWin", f"/Scripting/Script{sid}").run(
-                dbus_interface="org.kde.kwin.Script")
+            self._load_and_run(path, plugin)
         finally:
             os.unlink(path)
+
+    def _load_and_run(self, path, plugin):
+        """KWin numbers a new script by how many are loaded, so after an unload the number can
+        be one a running script already has: its D-Bus path then belongs to that one and ours
+        never runs (this kept the picker in the taskbar, so Plasma's fullscreen Do Not Disturb
+        kicked in). And unloadScript only deletes on KWin's next loop pass: until then loading
+        the same name again fails (-1)."""
+        for _ in range(100):
+            taken = script_ids(self._introspect())
+            sid = int(self._load(path, plugin, signature="ss"))
+            if sid >= 0:
+                break
+            time.sleep(0.01)
+        else:
+            raise RuntimeError(f"KWin did not load the {plugin} script")
+        if sid in taken:
+            self._start_all()   # runs every loaded script that isn't running yet: ours included
+        else:
+            self.bus.get_object("org.kde.KWin", f"/Scripting/Script{sid}").run(
+                dbus_interface="org.kde.kwin.Script")
 
     def list_windows(self, timeout=3.0):
         """Return KWin windows in stacking order (bottom first)."""
@@ -327,6 +348,11 @@ class KWin:
             except dbus.DBusException:
                 pass
             self._skipped.clear()
+
+
+def script_ids(introspection_xml):
+    """Script numbers that have a D-Bus path under /Scripting."""
+    return {int(n) for n in re.findall(r'<node name="Script(\d+)"', introspection_xml)}
 
 
 def request_stop(bus):
