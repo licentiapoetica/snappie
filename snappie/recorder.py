@@ -1,4 +1,8 @@
-"""GStreamer pipeline: PipeWire screen stream -> crop -> VAAPI encode + audio -> MKV."""
+"""GStreamer pipeline: PipeWire screen stream -> crop -> VAAPI encode + audio -> MKV.
+
+VP8 (and VP9 where the GPU can't encode it, e.g. AMD) use libvpx on the CPU in
+its realtime mode.
+"""
 
 import os
 import shutil
@@ -16,14 +20,18 @@ Gst.init(None)
 # a QP floor keeps static content from wasting bits.
 # quality: (bits per pixel per frame at 60 fps, min qp for hevc/h264, min qindex for av1)
 QUALITY = {"high": (0.50, 10, 30), "good": (0.30, 14, 50), "small": (0.12, 18, 72)}
-CODEC_EFFICIENCY = {"hevc": 1.0, "av1": 0.75, "h264": 1.5}
+CODEC_EFFICIENCY = {"hevc": 1.0, "av1": 0.75, "h264": 1.5, "vp9": 1.0, "vp8": 1.5}
 
 CODECS = {
     # name: (encoder factory, parser, width align, height align)
     "hevc": ("vah265enc", "h265parse", 2, 2),
     "h264": ("vah264enc", "h264parse", 2, 2),
     "av1": ("vaav1enc", "av1parse", 64, 16),  # AMD pads AV1 to 64x16 with black otherwise
+    "vp9": ("vavp9enc", "vp9parse", 2, 2),    # Intel only; AMD and NVIDIA can't encode VP9
 }
+# CPU encoders, used when the GPU has none for the codec
+SOFTWARE = {"av1-sw": "svtav1enc", "vp9-sw": "vp9enc", "vp8-sw": "vp8enc"}
+WEBM_CODECS = ("vp9", "vp8", "av1")   # what a WebM file may contain
 
 
 # Screen pixels are sRGB values; video players decode BT.709 and display them
@@ -39,30 +47,65 @@ def have(factory):
     return Gst.ElementFactory.find(factory) is not None
 
 
-def pick_codec(wanted):
-    order = [wanted] + [c for c in ("hevc", "av1", "h264") if c != wanted]
+def _convert(codec):
+    if codec not in SOFTWARE:
+        return GPU_CONVERT
+    # CPU encoders convert on the CPU too (works without VA-API, e.g. NVIDIA);
+    # videoconvert applies the same plain BT.709 matrix.
+    return f"videoconvert n-threads={min(os.cpu_count() or 4, 16)} ! video/x-raw,format=I420,colorimetry=bt709"
+
+
+def base_codec(codec):
+    """"vp9-sw" -> "vp9"."""
+    return codec[:-3] if codec.endswith("-sw") else codec
+
+
+def pick_codec(wanted, webm=False):
+    """The encoder to use: `wanted` on the GPU, else on the CPU, else another codec.
+    webm: only codecs a WebM file can hold (anything else asked for becomes VP9)."""
+    if webm and wanted not in WEBM_CODECS:
+        wanted = "vp9"
+    others = [c for c in (WEBM_CODECS if webm else ("hevc", "av1", "h264")) if c != wanted]
+    order = [wanted, wanted + "-sw"] + others + [c + "-sw" for c in others] + ["vp9-sw"]  # last resort: libvpx
     for name in order:
-        if have(CODECS[name][0]):
+        factory = CODECS[name][0] if name in CODECS else SOFTWARE.get(name)
+        if factory and have(factory):
             return name
-    if have("svtav1enc"):
-        return "av1-sw"
     from . import deps
     raise RuntimeError(f"No usable video encoder ({deps.install_hint(['encoder'])})")
+
+
+def final_container(codec, wanted):
+    """mp4 | mkv | webm for a recording in `codec`; MP4 can't hold VP8, so that becomes WebM."""
+    if wanted == "mp4" and base_codec(codec) == "vp8":
+        return "webm"
+    return wanted
 
 
 def _encoder_desc(codec, quality, qp, pixels):
     """pixels: approximate encoded width*height (sets the bitrate ceiling)."""
     bpp, min_qp, min_qindex = QUALITY[quality]
+    kbps = max(2000, int(pixels * 60 * bpp * CODEC_EFFICIENCY[base_codec(codec)] / 1000))
     if codec == "av1-sw":
-        return f"videoconvert ! video/x-raw,colorimetry=bt709 ! svtav1enc preset=10 crf={qp or 32} ! av1parse"
+        return f"svtav1enc preset=10 crf={qp or 32} ! av1parse"
+    if codec in ("vp9-sw", "vp8-sw"):
+        # realtime mode: fast enough for 60 fps; libvpx quantizers are 0-63 (AV1/VP9 qindex / 4)
+        q = min(max(qp, 0), 63) if qp else None
+        rc = (f"end-usage=vbr target-bitrate={kbps * 1000} min-quantizer={q if q is not None else min_qindex // 4}"
+              + (f" max-quantizer={q}" if q is not None else ""))
+        threads = min(os.cpu_count() or 4, 16)
+        common = f"deadline=1 cpu-used=8 threads={threads} lag-in-frames=0 keyframe-max-dist=240 {rc}"
+        if codec == "vp9-sw":
+            return f"vp9enc {common} row-mt=true tile-columns=3 ! vp9parse"
+        return f"vp8enc {common} token-partitions=3"
     enc, parse = CODECS[codec][:2]
+    qindex = codec in ("av1", "vp9")   # 0-255 scale instead of 0-51
     extra = " b-frames=0" if codec == "h264" else ""
     if qp:  # explicit constant quantizer
-        rc = f"rate-control=cqp qp={qp}" if codec == "av1" else \
+        rc = f"rate-control=cqp qp={qp}" if qindex else \
             f"rate-control=cqp qpi={max(qp - 2, 1)} qpp={qp} qpb={qp}"
     else:
-        kbps = max(2000, int(pixels * 60 * bpp * CODEC_EFFICIENCY[codec] / 1000))
-        floor = min_qindex if codec == "av1" else min_qp
+        floor = min_qindex if qindex else min_qp
         rc = f"rate-control=vbr bitrate={kbps} target-percentage=80 cpb-size={kbps * 2} min-qp={floor}"
     # target-usage=1: the encoder's best-quality preset (still >100 fps at 3440x1440 on RDNA3)
     return f"{enc} {rc} target-usage=1 key-int-max=240{extra} ! {parse}"
@@ -108,10 +151,7 @@ class Recorder:
             + f" ! videocrop name=crop{rate} ! queue max-size-buffers=8 leaky=downstream"
         ]
         enc = _encoder_desc(codec, quality, qp, rect[2] * rect[3] * scale * scale)
-        if codec == "av1-sw":
-            desc.append(f" ! {enc} ! queue ! mux.")
-        else:
-            desc.append(f" ! {GPU_CONVERT} ! {enc} ! queue ! mux.")
+        desc.append(f" ! {_convert(codec)} ! {enc} ! queue ! mux.")
         sources = []
         if system_audio:
             sources.append("pulsesrc device=@DEFAULT_MONITOR@ client-name=snappie")
@@ -175,6 +215,9 @@ class Recorder:
             self._crop = (px, py, pw, ph)
         px, py, pw, ph = self._crop
         pw, ph = min(pw, W), min(ph, H)   # window shrank below the area: can't keep the size
+        # ...but keep whole encoder blocks: an odd width made AMD's AV1 encoder hang the GPU
+        _, _, aw, ah = CODECS.get(self.codec, (0, 0, 2, 2))
+        pw, ph = max(pw - pw % aw, min(W, aw)), max(ph - ph % ah, min(H, ah))
         px = min(max(px, 0), W - pw)
         py = min(max(py, 0), H - ph)
         self._crop_origin = (px, py)   # where the kept area starts in the full frame (for the overlay)
@@ -327,11 +370,12 @@ def to_animation(video, out_path, fps=15, max_width=960):
     return out_path
 
 
-def remux_mp4(mkv_path, codec):
-    """Fast lossless container change to MP4 (plays everywhere). Returns final path."""
-    if not shutil.which("ffmpeg"):
+def remux(mkv_path, codec, container="mp4"):
+    """Fast lossless container change to MP4 (plays everywhere) or WebM (browsers).
+    Returns the final path (the MKV if that fails)."""
+    if container == "mkv" or not shutil.which("ffmpeg"):
         return mkv_path
-    mp4 = mkv_path[:-4] + ".mp4"
+    out = mkv_path[:-4] + "." + container
     tag = ["-tag:v", "hvc1"] if codec == "hevc" else []
     # write BT.709 limited range into the bitstream itself too, not only the container
     vui = {"hevc": "hevc_metadata", "h264": "h264_metadata"}.get(codec)
@@ -341,9 +385,15 @@ def remux_mp4(mkv_path, codec):
     elif codec.startswith("av1"):
         tag += ["-bsf:v", "av1_metadata=color_primaries=1:transfer_characteristics=1:matrix_coefficients=1"
                           ":color_range=tv"]
-    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", mkv_path, "-map", "0", "-c", "copy", *tag,
-                        "-movflags", "+faststart", mp4], capture_output=True, text=True)
+    elif codec.startswith("vp9"):
+        tag += ["-bsf:v", "vp9_metadata=color_space=bt709:color_range=tv"]
+    if container == "mp4":
+        tag += ["-movflags", "+faststart"]
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", mkv_path, "-map", "0", "-c", "copy", *tag, out],
+                       capture_output=True, text=True)
     if r.returncode == 0:
         os.unlink(mkv_path)
-        return mp4
+        return out
+    if os.path.exists(out):
+        os.unlink(out)
     return mkv_path

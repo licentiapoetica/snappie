@@ -310,18 +310,21 @@ class SettingsDialog(QDialog):
         box, form = _form("Files")
         form.addRow("Folder:", self._bind("rec.dir", _Folder(_default_dir("VIDEOS", "~/Videos"))))
         name = self._bind("rec.filename", QLineEdit())
-        mp4 = self._bind("rec.mp4", _combo([("MP4", True), ("MKV", False)]))
+        container = self._bind("rec.container", _combo([
+            ("MP4", "mp4"), ("MKV", "mkv"), ("WebM (VP9, VP8 or AV1)", "webm")]))
         form.addRow("File name:", name)
-        preview = self._preview_label(name, lambda: "mp4" if mp4.currentData() else "mkv")
+        preview = self._preview_label(name, container.currentData)
         form.addRow("", preview)
-        mp4.setToolTip("Always recorded as MKV (safe if something crashes), then remuxed to MP4 losslessly")
-        form.addRow("Container:", mp4)
-        mp4.currentIndexChanged.connect(preview.refresh)
+        container.setToolTip("Always recorded as MKV (safe if something crashes), then remuxed losslessly.\n"
+                             "WebM holds only VP9, VP8 and AV1: other codecs record as VP9.")
+        form.addRow("Container:", container)
+        container.currentIndexChanged.connect(preview.refresh)
         v.addWidget(box)
 
         box, form = _form("Video and sound")
         form.addRow("Codec:", self._bind("rec.codec", _combo([
-            ("HEVC (H.265)", "hevc"), ("AV1 (smallest files)", "av1"), ("H.264 (most compatible)", "h264")])))
+            ("HEVC (H.265)", "hevc"), ("AV1 (smallest files)", "av1"), ("H.264 (most compatible)", "h264"),
+            ("VP9", "vp9"), ("VP8", "vp8")])))
         form.addRow("Quality:", self._bind("rec.quality", _combo([
             ("High", "high"), ("Good", "good"), ("Small files", "small")])))
         fps = self._bind("rec.fps", QSpinBox(minimum=0, maximum=240, suffix=" fps"))

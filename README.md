@@ -158,13 +158,18 @@ There are two ways to find what's inside a window:
   Audio is Opus 192 kbps from the desktop (`--mic` mixes in the microphone,
   `--no-audio` turns sound off).
 - Recorded as MKV, so a crash won't lose the file, then remuxed losslessly to
-  MP4.
+  MP4 (or WebM with `--container webm`, or kept as MKV with `--mkv`).
 - GIF uses one optimized palette for the whole clip (`gif.fps`, `gif.max_width`
   in Settings). WebP is smaller and has full color.
 - `--quality high|good|small` changes the ceiling. `--qp N` uses a constant
   quantizer instead.
 - `-c h264` is the most compatible. `-c av1` makes smaller files, but AMD can
   only encode AV1 in 64×16 blocks, so the area is rounded to that.
+- `-c vp9` and `-c vp8` are for WebM, which browsers and chat apps play
+  directly. Only Intel GPUs encode VP9; elsewhere VP9 and VP8 run on the CPU
+  (libvpx, in `gst-plugins-good`), which is heavier for big areas. WebM holds
+  only VP9, VP8 and AV1, so other codecs record as VP9 there. VP8 can't go in
+  MP4, so it's saved as WebM.
 
 ## Files
 

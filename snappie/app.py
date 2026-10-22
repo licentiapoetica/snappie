@@ -804,7 +804,7 @@ class App(QObject):
             "qp": ns.qp, "fps": ns.fps or settings.get("rec.fps") or None,
             "audio": not ns.no_audio and settings.get("rec.audio"),
             "mic": ns.mic or settings.get("rec.mic"),
-            "mp4": not ns.mkv and settings.get("rec.mp4"),
+            "container": ns.container or ("mkv" if ns.mkv else settings.get("rec.container")),
             "anim": anim, "duration": ns.duration, "output": ns.output, "delay": ns.delay,
             "clicks": ns.clicks or settings.get("rec.clicks"),
             "keys": ns.keys or settings.get("rec.keys"),

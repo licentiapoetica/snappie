@@ -33,13 +33,13 @@ DEFAULTS = {
     # -- recording --
     "rec.dir": "",                        # "" = <Videos>/snappie
     "rec.filename": "snappie_%Y-%m-%d_%H-%M-%S",
-    "rec.codec": "hevc",                  # hevc | av1 | h264
+    "rec.codec": "hevc",                  # hevc | av1 | h264 | vp9 | vp8
     "rec.quality": "good",                # high | good | small
     "rec.fps": 0,                         # 0 = native / variable
     "rec.audio": True,                    # desktop audio
     "rec.mic": False,
     "cursor": True,                       # record the cursor (key kept from older versions)
-    "rec.mp4": True,                      # remux to MP4 (else keep MKV)
+    "rec.container": "mp4",               # mp4 | mkv | webm (always recorded as MKV, then remuxed)
     "rec.after": [],                      # extra after recording: copy (path), upload
     "rec.clicks": False,                  # click ripples in the recording
     "rec.keys": False,                    # pressed keys in the recording
@@ -98,6 +98,8 @@ def get(key, default=None):
     data = load()
     if key in data:
         return data[key]
+    if key == "rec.container" and data.get("rec.mp4") is False:
+        return "mkv"   # older versions had a yes/no "rec.mp4"
     return DEFAULTS.get(key, default) if default is None else default
 
 

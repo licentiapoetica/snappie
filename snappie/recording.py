@@ -2,8 +2,8 @@
 
 Pausing finishes the current segment and keeps the KWin stream open; resuming
 starts a new segment on it.  A dropped stream reconnects into a new segment
-too.  At the end the segments are joined losslessly, then remuxed to MP4 or
-converted to GIF / WebP.
+too.  At the end the segments are joined losslessly, then remuxed to MP4 /
+WebM or converted to GIF / WebP.
 """
 
 import os
@@ -17,7 +17,7 @@ from .app_util import log
 
 class Recording:
     def __init__(self, app, sel, opts, on_end):
-        """sel: picker.Selection. opts: dict (codec, quality, qp, fps, audio, mic, mp4, anim,
+        """sel: picker.Selection. opts: dict (codec, quality, qp, fps, audio, mic, container, anim,
         duration, output, delay). on_end(path or None, error or None)."""
         self.app, self.kwin, self.sel, self.opts, self.on_end = app, app.kwin, sel, opts, on_end
         self.stream = None
@@ -50,13 +50,14 @@ class Recording:
         from PyQt6.QtGui import QGuiApplication
         from .recorder import CODECS, pick_codec
         want = self.opts["codec"]
+        webm = self._wanted_ext() == "webm"
         try:
-            self.codec = pick_codec(want)
+            self.codec = pick_codec(want, webm=webm)
         except RuntimeError as e:
             self._fail(str(e))
             return False
         if self.codec != want:
-            log(f"{want} encoder not available, using {self.codec}")
+            log(f"using {self.codec} instead of {want}" + (" (WebM)" if webm else " (no encoder for it)"))
         pointer = cast.POINTER_EMBEDDED if self.sel.show_cursor else cast.POINTER_HIDDEN
         r = self.sel.rect
         rect = (r.x(), r.y(), r.width(), r.height())
@@ -120,14 +121,33 @@ class Recording:
         if self.opts.get("duration"):
             GLib.timeout_add(int(self.opts["duration"] * 1000), lambda: self.stop() or False)
 
-    def _output_path(self):
+    def _output_file(self):
+        """The file named by --output, or None for a directory / the default folder."""
         out = self.opts.get("output")
         if out and not os.path.isdir(os.path.expanduser(out)) and os.path.splitext(out)[1]:
-            final = os.path.abspath(os.path.expanduser(out))
+            return os.path.abspath(os.path.expanduser(out))
+        return None
+
+    def _wanted_ext(self):
+        """gif | webp | mp4 | mkv | webm (or whatever --output ends in)."""
+        f = self._output_file()
+        if f:
+            return os.path.splitext(f)[1][1:].lower()
+        return self.opts.get("anim") or self.opts["container"]
+
+    def _output_path(self):
+        from .recorder import final_container
+        final = self._output_file()
+        ext = self._wanted_ext()
+        if ext in ("mp4", "mkv", "webm") and final_container(self.codec, ext) != ext:
+            log(f"{self.codec} can't go in {ext.upper()}, saving as {final_container(self.codec, ext).upper()}")
+            ext = final_container(self.codec, ext)
+            final = final and os.path.splitext(final)[0] + "." + ext
+        if final:
             os.makedirs(os.path.dirname(final), exist_ok=True)
         else:
+            out = self.opts.get("output")
             d = os.path.abspath(os.path.expanduser(out)) if out else settings.videos_dir()
-            ext = self.opts.get("anim") or ("mp4" if self.opts["mp4"] else "mkv")
             final = settings.unique_path(d, settings.get("rec.filename"), ext)
         self.final_ext = os.path.splitext(final)[1].lower()
         self.final_path = final
@@ -419,7 +439,7 @@ class Recording:
 
     def _save(self, failed=None):
         """Join segments, remux / convert, report. failed: error text (still keeps the recording)."""
-        from .recorder import join_parts, remux_mp4, to_animation
+        from .recorder import join_parts, remux, to_animation
         self._hide_controls()
         self._stop_live()
         if self.stream:
@@ -437,8 +457,8 @@ class Recording:
                 path = out
             except RuntimeError as e:
                 failed = failed or str(e)
-        elif self.final_ext == ".mp4":
-            path = remux_mp4(path, self.codec)
+        elif self.final_ext in (".mp4", ".webm"):
+            path = remux(path, self.codec, self.final_ext[1:])
         else:
             os.replace(path, self.final_path)
             path = self.final_path
