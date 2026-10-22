@@ -58,16 +58,18 @@ def _record_args(r):
     g.add_argument("--gif", action="store_true", help="make a GIF")
     g.add_argument("--webp", action="store_true", help="make an animated WebP")
     r.add_argument("--last", action="store_true", help="record the same area / window as last time")
-    r.add_argument("-o", "--output", help="output file (.mp4/.mkv/.gif/.webp) or directory")
-    r.add_argument("-c", "--codec", choices=["hevc", "av1", "h264"],
-                   help="video codec, hardware encoded via VAAPI (default: settings, hevc)")
+    r.add_argument("-o", "--output", help="output file (.mp4/.mkv/.webm/.gif/.webp) or directory")
+    r.add_argument("-c", "--codec", choices=["hevc", "av1", "h264", "vp9", "vp8"],
+                   help="video codec (default: settings, hevc); VP8, and VP9 on AMD/NVIDIA, use the CPU")
     r.add_argument("-q", "--quality", choices=["high", "good", "small"], help="quality preset")
     r.add_argument("--qp", type=int, help="constant quantizer instead of capped VBR (overrides --quality)")
     r.add_argument("--fps", type=int, help="force a constant frame rate (default: native, variable)")
     r.add_argument("--no-audio", action="store_true", help="don't record desktop audio")
     r.add_argument("--mic", action="store_true", help="also record (mix in) the default microphone")
     r.add_argument("--no-cursor", action="store_true", help="don't record the mouse cursor")
-    r.add_argument("--mkv", action="store_true", help="keep MKV instead of remuxing to MP4")
+    r.add_argument("--container", choices=["mp4", "mkv", "webm"],
+                   help="file type (default: settings, mp4); WebM records VP9 unless -c is vp8 or av1")
+    r.add_argument("--mkv", action="store_true", help="same as --container mkv")
     r.add_argument("--clicks", action="store_true", help="show mouse clicks in the recording")
     r.add_argument("--keys", action="store_true", help="show pressed keys in the recording")
     r.add_argument("--delay", type=float, default=0, help="seconds to wait before recording")
