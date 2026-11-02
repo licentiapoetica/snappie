@@ -115,10 +115,10 @@ at-spi-dbus-bus.service` fixes it).
   ~110-char lines. No type hints, no linter config.
 - Keep `cli.py` and the `_forward` path in `__main__` import-light.
 - README is user-facing and written in short, plain sentences; update it with features.
-- Git: Gitea at `git.lat`, repo `kibi/snappie` (`origin`). The `screenrecorder` remote is
-  the obsolete pre-rename repo; never push there.
-- Work on a feature branch and open a Gitea PR into `master` (like `sharex-features`);
+- Git: GitHub, repo `licentiapoetica/snappie` (`origin`). The old Gitea repo at `git.lat` is
+  gone. The `screenrecorder` remote is the obsolete pre-rename repo; never push there.
+- Work on a feature branch and open a GitHub PR into `master` (like `sharex-features`);
   don't commit straight to `master`. Commit subjects are short summaries of user-visible
   changes.
-- Dev machine: AMD RDNA3 GPU (VAAPI), openSUSE, Plasma 6 Wayland. Only one of the setups
+- Dev machine: AMD RDNA3 GPU (VAAPI), Arch Linux, Plasma 6 Wayland. Only one of the setups
   to support (see Audience).
