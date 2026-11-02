@@ -1,0 +1,10 @@
+# Python libraries Snappie is tested with. Dependabot watches this file and CI installs it.
+# For normal use, install your distro's packages instead (see README); any recent version works.
+# GStreamer, PipeWire, ffmpeg and tesseract are system packages and aren't listed here.
+PyQt6==6.12.0
+numpy==2.5.4
+requests==2.34.2
+dbus-python==1.5.1
+PyGObject==3.58.1
+evdev==2.0.0
+pytest==9.2.0
