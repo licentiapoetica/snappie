@@ -96,7 +96,8 @@ it, and *shadow* adds a soft drop shadow around it.
 After picking, a toolbar appears next to the area on the frozen screen:
 arrow, line, rectangle, ellipse, text, pen, highlighter, marker, blur,
 pixelate, redact, numbered steps, magnifier and crop. Shapes stay editable, and
-the area can still be moved and resized. Enter runs the after-capture actions
+the area can still be moved and resized. Drag the toolbar by its grip (or any
+gap between buttons) to put it anywhere; double-click it to bring it back. Enter runs the after-capture actions
 (default: copy + save). Esc cancels. The editor button opens a full editor
 window with zoom, canvas crop and a frame panel (padding, background, rounded
 corners, shadow).

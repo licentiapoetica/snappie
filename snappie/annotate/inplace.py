@@ -2,9 +2,11 @@
 
 The whole frozen screen is the document's base image and the selection is
 its crop, so the selection can still be moved and resized after drawing
-(shapes stay where they are on screen).  Every action ends the session: the
-overlay emits action(name, doc), then hides and deletes itself (unless the
-handler already did); the Document stays valid for whoever handles it.
+(shapes stay where they are on screen).  The panels follow the selection
+until the user drags them somewhere; then they stay put for this session.
+Every action ends the session: the overlay emits action(name, doc), then hides
+and deletes itself (unless the handler already did); the Document stays valid
+for whoever handles it.
 """
 
 from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, pyqtSignal
@@ -65,6 +67,10 @@ class InPlaceEditor(QWidget):
         self.tools.set_tool(self.canvas.tool)
         self.props = PropsPanel(self)
         self.props.changed.connect(self.canvas.set_prop)
+        self._manual = None     # toolbar top-left once dragged by the user
+        for panel in (self.tools, self.props):
+            panel.drag.connect(lambda pos, panel=panel: self._drag_panels(panel, pos))
+            panel.drag_reset.connect(lambda: self._drag_panels(None, None))
         self._placed_for = None
         self._sync_props()
 
@@ -138,16 +144,31 @@ class InPlaceEditor(QWidget):
             self._place_panels()
         self.tools.undo.setEnabled(self.doc.can_undo())
         self.tools.redo.setEnabled(self.doc.can_redo())
-        # repaint around the panels only: re-styling ~40 buttons per mouse move is the slow part
+        self._update_around_panels()
+
+    def _update_around_panels(self):
+        # re-styling ~40 buttons per mouse move is the slow part, so leave the panels out
         dirty = QRegion(self.rect())
         for w in (self.tools, self.props):
             if w.isVisible():
                 dirty -= QRegion(w.geometry())
         self.update(dirty)
 
+    def _drag_panels(self, panel, pos):
+        """`panel` was dragged so its top-left is at `pos`; (None, None) puts both back."""
+        if panel is None:
+            self._manual = None
+        elif panel is self.tools:
+            self._manual = pos
+        else:   # the props strip drags the toolbar along; fixed offset, so a flip above can't jitter
+            t, p = self.tools.size(), self.props.size()
+            self._manual = pos - QPoint((t.width() - p.width()) // 2, t.height() + GAP // 2)
+        self._place_panels()
+        self._update_around_panels()    # the size tag may (re)appear where the toolbar was
+
     def _place_panels(self, force=False):
         sel = self.doc.bounds().toAlignedRect()
-        key = (sel, self.props.isVisibleTo(self), self.width(), self.height())
+        key = (sel, self.props.isVisibleTo(self), self.width(), self.height(), self._manual)
         if not force and key == self._placed_for:
             return
         self._placed_for = key
@@ -157,10 +178,10 @@ class InPlaceEditor(QWidget):
         show_props = bool(self.canvas.active_props()[0])
         self.props.setVisible(show_props and not self._busy())
         ps = self.props.relayout(maxw) if show_props else None
+        if self._manual is not None:
+            self._place_manual(ts, ps)
+            return
         h = ts.height() + (GAP // 2 + ps.height() if ps else 0)
-        w = max(ts.width(), ps.width() if ps else 0)
-        x = sel.center().x() - w // 2
-        x = max(MARGIN, min(x, scr.width() - w - MARGIN))
         if sel.bottom() + GAP + h <= scr.height() - MARGIN:          # below
             y = sel.bottom() + GAP
         elif sel.top() - GAP - h >= MARGIN:                           # above
@@ -172,6 +193,22 @@ class InPlaceEditor(QWidget):
         if ps:
             px = max(MARGIN, min(sel.center().x() - ps.width() // 2, scr.width() - ps.width() - MARGIN))
             self.props.move(px, y + ts.height() + GAP // 2)
+        self.tools.raise_()
+        self.props.raise_()
+
+    def _place_manual(self, ts, ps):
+        """Toolbar where the user dragged it (kept on screen), props centred below, or above."""
+        scr = self.rect()
+        x = max(MARGIN, min(self._manual.x(), scr.width() - ts.width() - MARGIN))
+        y = max(MARGIN, min(self._manual.y(), scr.height() - ts.height() - MARGIN))
+        self.tools.move(x, y)
+        if ps:
+            px = x + (ts.width() - ps.width()) // 2
+            px = max(MARGIN, min(px, scr.width() - ps.width() - MARGIN))
+            py = y + ts.height() + GAP // 2
+            if py + ps.height() > scr.height() - MARGIN:
+                py = y - GAP // 2 - ps.height()
+            self.props.move(px, py)
         self.tools.raise_()
         self.props.raise_()
 
