@@ -3,10 +3,12 @@ property strip (colours, width, fill, font size, …).
 
 They're child widgets of the overlay (no separate windows, so nothing for
 Wayland to misplace) and lay themselves out in rows that fit the screen.
+Dragging a panel by its grip or any gap between buttons asks the overlay to
+move it (the overlay keeps both panels together); a double-click puts them back.
 """
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QPoint, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QColorDialog, QLabel, QToolButton, QWidget
 
 from .. import style
@@ -24,13 +26,33 @@ class _Sep(QWidget):
         self.setStyleSheet("background: transparent;")
 
     def paintEvent(self, _):
-        from PyQt6.QtGui import QPainter
         p = QPainter(self)
         p.fillRect(SEP // 2, 7, 1, BTN - 14, QColor(255, 255, 255, 50))
 
 
+class _Grip(QWidget):
+    """Dotted handle; the press goes through to the panel, which does the dragging."""
+    W = 14
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setFixedSize(self.W, BTN)
+        self.setStyleSheet("background: transparent;")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip("Drag to move the toolbar · double-click to put it back")
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        c = QColor(255, 255, 255, 110)
+        for col in (0, 1):
+            for row in range(4):
+                p.fillRect(4 + col * 4, BTN // 2 - 7 + row * 4, 2, 2, c)
+
+
 class Panel(QWidget):
     """Black square panel whose items flow into as many rows as needed."""
+    drag = pyqtSignal(QPoint)       # wanted top-left, in the parent's coordinates
+    drag_reset = pyqtSignal()
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -39,6 +61,12 @@ class Panel(QWidget):
         self.setStyleSheet(style.PANEL_QSS + "QLabel { color: #eff0f1; background: transparent; }")
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.items = []
+        self._grab = None
+
+    def grip(self):
+        g = _Grip(self)
+        self.items.append(g)
+        return g
 
     def button(self, icon, tip, checkable=False, slot=None, text=None):
         b = QToolButton(self)
@@ -92,6 +120,30 @@ class Panel(QWidget):
     def wheelEvent(self, ev):
         ev.accept()     # don't let the overlay change the width behind the panel
 
+    # Presses between buttons used to fall through to the canvas; now they drag the panel.
+    # Positions are in the parent's coordinates: global ones aren't reliable on Wayland.
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._grab = ev.position().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        ev.accept()
+
+    def mouseMoveEvent(self, ev):
+        if self._grab is not None:
+            self.drag.emit(self.mapToParent(ev.position().toPoint()) - self._grab)
+        ev.accept()
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton and self._grab is not None:
+            self._grab = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        ev.accept()
+
+    def mouseDoubleClickEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.drag_reset.emit()
+        ev.accept()
+
 
 class ToolPanel(Panel):
     tool = pyqtSignal(str)
@@ -100,6 +152,7 @@ class ToolPanel(Panel):
     def __init__(self, parent):
         super().__init__(parent)
         self.tools = {}
+        self.grip()
         for tid, label, key, _, hint in TOOLS:
             name = "Reselect area" if tid == "crop" else label
             b = self.button(panel_icon(tid), f"<b>{name}</b> &nbsp;<span style='color:#9aa0a6'>{key}</span>",
