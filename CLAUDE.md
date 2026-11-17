@@ -39,8 +39,9 @@ artifacts. `.github/scripts/` contains the version gate, wheel smoke check (also
 Arch artifacts: `packaging/arch/PKGBUILD.in` is rendered with the release sdist's
 version and checksum. The release workflow builds `snappie` and optional
 `snappie-purpose` as an unprivileged user in the official Arch container and
-checks both installed packages before publishing. Keep the package's Python
-minor-version bounds: site-packages paths change on interpreter upgrades.
+checks both installed packages before publishing. Depend on Arch's `python`
+without a minor-version cap. Unofficial packages must be rebuilt after Python
+minor upgrades because the site-packages path changes.
 
 Runtime deps: python3-pyqt6 (incl. QtSvg), python3-dbus, PyGObject with GStreamer +
 GLib, numpy, gstreamer `pipewiresrc` and VA plugins (`vah265enc`/`vah264enc`/`vaav1enc`,

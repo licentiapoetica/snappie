@@ -84,9 +84,10 @@ both the capture helper and optional Share plugin are prebuilt. The package owns
 the launcher, icon and Share plugin; starting the app registers your shortcuts.
 Settings and history remain in your user directory.
 
-These packages target an up-to-date Arch Linux x86-64 system and the Python minor
-version used for that build. A new Python minor version needs a rebuilt package;
-use a newer release or build the source with the recipe described in
+These packages target an up-to-date Arch Linux x86-64 system. Like other
+unofficial Arch Python packages, rebuild and reinstall Snappie after a Python
+minor upgrade so its files go into the new interpreter's site-packages directory.
+Use a newer release or build the source with the recipe described in
 [the release guide](docs/releasing.md#arch-packages). If upgrading from a wheel
 installation, `~/.local/bin/snappie` may still point to the old virtual environment;
 use `/usr/bin/snappie` to launch the pacman-managed installation.

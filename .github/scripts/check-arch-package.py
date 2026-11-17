@@ -8,6 +8,12 @@ import tempfile
 
 from snappie import capture_helper, share_plugin
 
+metadata = subprocess.check_output(["bsdtar", "-xOf", sys.argv[1], ".PKGINFO"], text=True)
+dependencies = [line.removeprefix("depend = ") for line in metadata.splitlines() if line.startswith("depend = ")]
+python_dependencies = [dep for dep in dependencies
+                       if dep == "python" or dep.startswith(("python<", "python>", "python="))]
+assert python_dependencies == ["python"], python_dependencies
+
 assert capture_helper.BUNDLED.read_bytes().startswith(b"\x7fELF")
 plugin = share_plugin.system_plugin()
 assert plugin is not None, "KDE Share plugin is not installed"

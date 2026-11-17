@@ -32,8 +32,8 @@ notes="Linux wheels for x86-64 and ARM64, built on Ubuntu 22.04. Install with Py
 notes+="on a system with glibc 2.35+ and libwayland-client. KDE Plasma 6 on Wayland and the "
 notes+="documented runtime packages are required; see the README for installation. "
 notes+="Arch Linux x86-64 packages are also attached: snappie and optional snappie-purpose "
-notes+="for KDE Share menus. They target an up-to-date Arch system and its current Python minor "
-notes+="version. Install with pacman -U; see the README. SHA256SUMS covers all attached packages and source archives."
+notes+="for KDE Share menus. They target an up-to-date Arch system; rebuild after Python minor upgrades. "
+notes+="Install with pacman -U; see the README. SHA256SUMS covers all attached packages and source archives."
 
 found=0
 draft=$(release_field isDraft "$RELEASE_TAG") || found=$?

@@ -141,7 +141,8 @@ jobs:
         run: |
           pacman -U --noconfirm dist/*.pkg.tar.zst
           cd /tmp
-          python "$GITHUB_WORKSPACE/.github/scripts/check-arch-package.py"
+          python "$GITHUB_WORKSPACE/.github/scripts/check-arch-package.py" \
+            "$GITHUB_WORKSPACE"/dist/snappie-[0-9]*.pkg.tar.zst
       - uses: actions/upload-artifact@v7
         with:
           name: arch-x86_64

@@ -12,7 +12,7 @@ makedepends=(python-build python-installer python-setuptools python-wheel python
              cmake wayland purpose kcoreaddons qt6-base desktop-file-utils)
 options=('!debug')
 _source_version=@SOURCE_VERSION@
-source=("snappie-${_source_version}.tar.gz")
+source=("https://github.com/licentiapoetica/snappie/releases/download/v${_source_version}/snappie-${_source_version}.tar.gz")
 sha256sums=('@SOURCE_SHA256@')
 
 build() {
@@ -24,11 +24,7 @@ build() {
 }
 
 package_snappie() {
-    local python_min python_max
-    python_min=$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    python_max=$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor + 1}")')
-    # Python installs into a minor-version-specific site-packages directory.
-    depends=("python>=$python_min" "python<$python_max" python-pyqt6 qt6-svg python-dbus
+    depends=(python python-pyqt6 qt6-svg python-dbus
              python-gobject python-numpy python-requests gstreamer gst-plugin-pipewire
              gst-plugins-base gst-plugins-good gst-plugins-bad-libs ffmpeg wayland
              'kwin>=6' kglobalacceld kservice)
