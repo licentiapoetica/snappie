@@ -1,0 +1,3 @@
+include build_support.py
+include install.sh snappie.sh helper/build.sh
+include pytest.ini requirements.txt

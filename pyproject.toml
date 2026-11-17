@@ -37,6 +37,10 @@ Issues = "https://github.com/licentiapoetica/snappie/issues"
 [tool.setuptools]
 include-package-data = false
 
+[tool.setuptools.cmdclass]
+build_py = "build_support.BuildPy"
+bdist_wheel = "build_support.LinuxWheel"
+
 [tool.setuptools.packages.find]
 include = ["snappie", "snappie.annotate"]
 namespaces = false

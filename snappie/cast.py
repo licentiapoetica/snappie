@@ -1,6 +1,5 @@
 """KWin screen-cast streams (no portal dialog) via the snappie-cast helper."""
 
-import os
 import subprocess
 
 import numpy as np
@@ -11,25 +10,9 @@ from gi.repository import GLib, Gst  # noqa: E402
 
 Gst.init(None)
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-HELPER_SRC = os.path.join(HERE, "helper")
-HELPER = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
-                      "snappie", "snappie-cast")
+from .capture_helper import HELPER, ensure_helper  # noqa: E402
 
 POINTER_HIDDEN, POINTER_EMBEDDED = 1, 2
-
-
-def ensure_helper():
-    """Build + authorize the helper on first run (or when its source changed)."""
-    src = os.path.join(HELPER_SRC, "snappie-cast.c")
-    if os.path.exists(HELPER) and os.path.getmtime(HELPER) >= os.path.getmtime(src):
-        return
-    r = subprocess.run(["sh", os.path.join(HELPER_SRC, "build.sh")], capture_output=True, text=True)
-    if r.returncode != 0:
-        from . import deps
-        gone = deps.missing(["compiler", "pkg-config", "wayland"])
-        need = f" ({deps.install_hint(gone)})" if gone else ""
-        raise RuntimeError(f"building the capture helper failed{need}:\n" + r.stderr)
 
 
 def window_args(window_id, pointer):

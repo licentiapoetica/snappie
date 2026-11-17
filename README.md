@@ -17,7 +17,8 @@ snappie --help        # all commands
 
 KDE Plasma 6 (Wayland), Python 3 with PyQt6, dbus-python, PyGObject, NumPy and
 Requests, GStreamer with the PipeWire, base, good and VA plugins, ffmpeg, and
-gcc + Wayland headers for the capture helper. Optional: tesseract (OCR) and
+the Wayland client library. Source installs also need gcc + Wayland headers
+to build the capture helper. Optional: tesseract (OCR) and
 python-evdev (clicks and keys in recordings).
 
 `snappie deps` checks all of it and prints the install command for your distro;
@@ -26,7 +27,8 @@ python-evdev (clicks and keys in recordings).
 ```sh
 sudo pacman -S --needed python-pyqt6 qt6-svg python-dbus python-gobject python-numpy \
     python-requests gstreamer gst-plugin-pipewire gst-plugins-base gst-plugins-good \
-    gst-plugin-va gst-plugins-bad-libs ffmpeg gcc pkgconf wayland
+    gst-plugin-va gst-plugins-bad-libs ffmpeg wayland
+sudo pacman -S --needed gcc pkgconf   # source installs (including install.sh)
 sudo pacman -S --needed tesseract tesseract-data-eng python-evdev   # optional
 ```
 
@@ -35,7 +37,8 @@ On openSUSE:
 ```sh
 sudo zypper install python3-PyQt6 python3-dbus-python python3-gobject python3-numpy \
     python3-requests typelib-1_0-Gst-1_0 gstreamer-plugin-pipewire gstreamer-plugins-base \
-    gstreamer-plugins-good gstreamer-plugins-bad ffmpeg gcc pkgconf-pkg-config wayland-devel
+    gstreamer-plugins-good gstreamer-plugins-bad ffmpeg libwayland-client0
+sudo zypper install gcc pkgconf-pkg-config wayland-devel   # source installs
 sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evdev   # optional
 ```
 
@@ -52,10 +55,18 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/snappie deps
 ```
 
-The `snappie` command, icons and capture-helper sources are included in the package.
-The C helper is still compiled on first run, so the compiler and Wayland development
-packages remain required. GStreamer plugins, ffmpeg and optional Tesseract are also
-system dependencies. This package does not bundle Python or those tools.
+Installing from source builds the C capture helper once during packaging. The
+resulting wheel includes the `snappie` command, icons and compiled helper.
+Installing that wheel needs no compiler, pkg-config or Wayland headers:
+
+```sh
+.venv/bin/python -m pip install --no-deps /path/to/snappie-0.1.0-py3-none-linux_x86_64.whl
+```
+
+Use a wheel built for your CPU architecture and a compatible Linux system; the
+helper links to the system's Wayland client library and libc. KDE Plasma,
+GStreamer plugins, ffmpeg and optional Tesseract remain system dependencies.
+This package does not bundle Python or those tools.
 
 To register the launcher and global shortcut actions for this installation:
 
@@ -71,7 +82,8 @@ is stored elsewhere. `install.sh` remains the checkout-based alternative.
 For development, use `pip install --no-deps -e .` in that environment. The optional
 `input` extra installs evdev for click/key visualization; `dev` provides pytest and
 the build frontend. To produce a wheel and source archive, install `build` and run
-`python -m build`.
+`python -m build` with gcc, pkg-config, wayland-scanner and Wayland headers available.
+Builds do not register desktop entries or write to your user data directory.
 
 ## Tray and shortcuts
 
@@ -163,10 +175,13 @@ Stop with the bar, the tray icon, Ctrl+C, or `snappie stop`. Files go to
 ## Capture
 
 The tool records through KWin's own screen-cast API, the same one Spectacle
-uses. A tiny helper binary (sources in `snappie/helper/`) is built on first run (needs gcc and
-the Wayland headers). It's authorized through a hidden `.desktop` entry, so KWin
-never shows a dialog. The same helper drives the auto-scrolling for scrolling
-capture, through KWin's fake-input protocol.
+uses. A tiny helper binary (sources in `snappie/helper/`) is compiled into wheels.
+Source checkouts and editable installs build it on demand and rebuild when its
+sources change. On startup, Snappie puts the helper at a stable location in the
+user data directory and authorizes it through a hidden `.desktop` entry, so KWin
+never shows a dialog. Missing desktop entries are recreated automatically.
+The same helper drives the auto-scrolling for scrolling capture, through KWin's
+fake-input protocol.
 
 - **Window or anything inside one**: the window's own stream. It stays correct
   when other windows cover it, and it follows the window when you move it.

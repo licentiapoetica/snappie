@@ -15,7 +15,9 @@ features, commands or settings change.
 ```
 
 `pyproject.toml` defines the installable package and the `snappie` command; SVG icons and
-helper sources ship in the wheel. `snappie.sh` still sets `PYTHONPATH` and runs
+the compiled helper ship in Linux platform wheels. `build_support.py` compiles the
+helper during wheel builds without writing user data; `snappie.capture_helper`
+installs it at a stable path and registers it with KWin. `snappie.sh` still sets `PYTHONPATH` and runs
 `python3 -m snappie` for checkout use. If the tray app is already running,
 a new invocation only forwards its argv over D-Bus, so **restart the tray app**
 (`snappie quit`) to test code changes.
@@ -24,8 +26,9 @@ Logs: stderr and `~/.local/state/snappie/snappie.log`.
 
 Runtime deps: python3-pyqt6 (incl. QtSvg), python3-dbus, PyGObject with GStreamer +
 GLib, numpy, gstreamer `pipewiresrc` and VA plugins (`vah265enc`/`vah264enc`/`vaav1enc`,
-`vapostproc`), gcc + wayland-devel + wayland-scanner (helper build), ffmpeg (GIF/WebP),
+`vapostproc`), libwayland-client, ffmpeg (GIF/WebP),
 optional tesseract (OCR), Noto Color Emoji font. libatspi via gi for the a11y picker.
+Source builds/checkouts additionally need gcc + pkg-config + wayland-devel + wayland-scanner.
 
 ## Layout
 
@@ -35,7 +38,8 @@ optional tesseract (OCR), Noto Color Emoji font. libatspi via gi for the a11y pi
 | `snappie/cli.py` | argparse; must stay free of heavy imports (hotkey fast path) |
 | `snappie/app.py` | `App`: tray, command dispatch (`_run`), capture flows, one-shot vs daemon lifetime |
 | `snappie/kwin.py` | KWin scripting over D-Bus (JS strings), owns the `io.github.snappie` service |
-| `snappie/cast.py` | runs `snappie-cast`, PipeWire node → GStreamer frames; builds helper on demand |
+| `snappie/cast.py` | runs `snappie-cast`, PipeWire node → GStreamer frames |
+| `snappie/capture_helper.py` | installs bundled helper, compiles checkout sources on demand, registers with KWin |
 | `snappie/helper/snappie-cast.c` | C helper: `zkde_screencast_unstable_v1` streams + `org_kde_kwin_fake_input` |
 | `snappie/recorder.py` | GStreamer pipeline: pipewiresrc → crop → VAAPI encode + Opus audio → MKV |
 | `snappie/recording.py` | one recording: segments (pause/reconnect), join, remux MP4 / convert GIF/WebP |
@@ -65,8 +69,9 @@ optional tesseract (OCR), Noto Color Emoji font. libatspi via gi for the a11y pi
   thumbnails.
 - **No portal, no dialog.** Capture goes through KWin's own screencast protocol via
   `snappie-cast`, authorized by a hidden `snappie-cast.desktop` with
-  `X-KDE-Wayland-Interfaces`. It must be a real binary (not a script). `cast.ensure_helper`
-  rebuilds it when `snappie-cast.c` is newer than the installed binary.
+  `X-KDE-Wayland-Interfaces`. It must be a real binary (not a script).
+  `capture_helper.ensure_helper` refreshes bundled binaries by content, or rebuilds
+  checkout helpers when the hash of the C, XML or build script sources changes.
 - **Wayland apps can't place themselves.** Every overlay/bar/pin is positioned by a KWin
   script that finds our window **by pid + exact window title**. So:
   - Window titles (`TITLE = "Snappie — …"`) are load-bearing; don't change them casually.
