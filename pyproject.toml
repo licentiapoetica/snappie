@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snappie"
+version = "0.1.0"
+description = "Screenshots, annotation, screen recording and sharing for KDE Plasma on Wayland"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "PyQt6",
+    "numpy",
+    "requests",
+    "dbus-python",
+    "PyGObject",
+]
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: Capture :: Screen Capture",
+]
+
+[project.optional-dependencies]
+input = ["evdev"]
+dev = ["pytest", "build"]
+
+[project.scripts]
+snappie = "snappie.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/licentiapoetica/snappie"
+Issues = "https://github.com/licentiapoetica/snappie/issues"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.cmdclass]
+build_py = "build_support.BuildPy"
+bdist_wheel = "build_support.LinuxWheel"
+
+[tool.setuptools.packages.find]
+include = ["snappie", "snappie.annotate"]
+namespaces = false
+
+[tool.setuptools.package-data]
+snappie = ["icons/*.svg", "helper/*.sh", "helper/*.c", "helper/*.xml"]

@@ -19,7 +19,7 @@ class Dep:
 
     def __init__(self, key, label, kind, names, packages, feature=None):
         """kind: python (modules) | typelib | gst (elements) | gst-any (one of them is
-        enough) | cmd | pkgconfig. packages: {distro family: [package, ...]}.
+        enough) | cmd | pkgconfig | library. packages: {distro family: [package, ...]}.
         feature: None when required, else what doesn't work without it."""
         self.key, self.label, self.kind, self.names = key, label, kind, names
         self.packages, self.feature = packages, feature
@@ -53,7 +53,9 @@ DEPS = [
     Dep("parsers", "GStreamer video parsers", "gst", ["h265parse", "h264parse", "av1parse"],
         _p("gst-plugins-bad-libs", "gstreamer-plugins-bad")),
     Dep("ffmpeg", "ffmpeg", "cmd", ["ffmpeg"], _p("ffmpeg", "ffmpeg")),
-    # building the capture helper (helper/build.sh)
+    Dep("wayland-runtime", "Wayland client library", "library", ["wayland-client"],
+        _p("wayland", "libwayland-client0")),
+    # building the capture helper (snappie/helper/build.sh)
     Dep("compiler", "a C compiler", "cmd", ["cc"], _p("gcc", "gcc")),
     Dep("pkg-config", "pkg-config", "cmd", ["pkg-config"], _p("pkgconf", "pkgconf-pkg-config")),
     Dep("wayland", "Wayland client headers", "pkgconfig", ["wayland-client", "wayland-scanner"],
@@ -111,6 +113,17 @@ def _load_gst():
 
 def _has(dep, name):
     kind = dep.kind
+    if kind == "library":
+        import ctypes
+        import ctypes.util
+        library = ctypes.util.find_library(name)
+        if not library:
+            return False
+        try:
+            ctypes.CDLL(library)
+            return True
+        except OSError:
+            return False
     if kind == "python":
         try:
             importlib.import_module(name)
@@ -148,6 +161,10 @@ def is_missing(dep):
 def missing(keys=None, optional=True):
     """The Deps (all, or those named in `keys`) that aren't installed."""
     deps = [BY_KEY[k] for k in keys] if keys else DEPS
+    if keys is None:
+        from .capture_helper import needs_build
+        if not needs_build():
+            deps = [d for d in deps if d.key not in ("compiler", "pkg-config", "wayland")]
     return [d for d in deps if (optional or d.feature is None) and is_missing(d)]
 
 
