@@ -1,6 +1,24 @@
 import os
 
+import pytest
+
 from snappie import cli
+
+
+@pytest.mark.parametrize("argv,foreground", [
+    ([], False), (["tray"], False), (["--foreground"], True), (["tray", "--foreground"], True),
+])
+def test_tray_startup_mode(argv, foreground):
+    ns = cli.parse(argv)
+    assert ns.cmd == "tray" and ns.foreground is foreground
+
+
+def test_background_option_keeps_legacy_recording_options():
+    assert cli.parse(["--fps", "60"]).cmd == "record"
+    assert cli.parse(["--stop"]).cmd == "stop"
+    assert cli.parse(["service"]).cmd == "service"
+    with pytest.raises(cli.ArgError):
+        cli.parse(["shot", "--foreground"])
 
 
 def test_upload_takes_several_files():

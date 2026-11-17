@@ -1134,6 +1134,6 @@ def _set_autostart(on):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write("[Desktop Entry]\nType=Application\nName=snappie\n"
-                    f"Exec={launcher()} tray\nIcon={ICON}\nX-KDE-autostart-phase=2\nNoDisplay=true\n")
+                    f"Exec={launcher()} tray --foreground\nIcon={ICON}\nX-KDE-autostart-phase=2\nNoDisplay=true\n")
     elif os.path.exists(path):
         os.unlink(path)

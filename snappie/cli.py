@@ -19,10 +19,12 @@ class _Parser(argparse.ArgumentParser):
 
 def build_parser():
     ap = _Parser(prog="snappie", description="Screenshots, annotation and screen recording for "
-                                               "KDE Plasma (Wayland). Without a command: start the tray app.")
+                                               "KDE Plasma (Wayland). Without a command: start the tray app "
+                                               "in the background. Use --foreground for debugging.")
     sub = ap.add_subparsers(dest="cmd", parser_class=_Parser, metavar="command")
 
-    sub.add_parser("tray", help="start the tray app (default)")
+    tray = sub.add_parser("tray", help="start the tray app in the background (default)")
+    tray.add_argument("--foreground", action="store_true", help="stay attached to the terminal for debugging")
 
     s = sub.add_parser("shot", help="take a screenshot (pick an area)")
     g = s.add_mutually_exclusive_group()
@@ -92,6 +94,8 @@ def normalize(argv):
     argv = list(argv)
     if not argv:
         return ["tray"]
+    if argv[0] == "--foreground":
+        return ["tray"] + argv
     if argv[0] == "--stop":
         return ["stop"]
     if argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
