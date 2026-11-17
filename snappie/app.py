@@ -274,6 +274,8 @@ class App(QObject):
             menu.addAction(a)
             return a
 
+        add("History", ["history"], "view-history")   # first: the most used window
+        menu.addSeparator()
         rec = self.recording
         if rec:
             from .icons import tray_icon
@@ -314,7 +316,6 @@ class App(QObject):
         a.triggered.connect(self._open_image_dialog)
         menu.addAction(a)
         menu.addSeparator()
-        add("History", ["history"], "view-history")
         add("Settings", ["settings"], "configure")
         if self.daemon:
             add("Quit", ["quit"], "application-exit")
