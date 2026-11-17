@@ -331,7 +331,8 @@ class ScrollCapture(QObject):
             self.cast = CastStream(window_args(self.win["id"], POINTER_HIDDEN),
                                    self._on_node, self._on_closed, self._on_error)
         except (OSError, RuntimeError) as e:
-            QTimer.singleShot(0, lambda: self._finish(str(e)))
+            msg = str(e)   # `e` is gone once the except block ends, before the timer fires
+            QTimer.singleShot(0, lambda: self._finish(msg))
             return
         if not self.manual and self.stop_on_mouse:
             self._prev_on_cursor = self.kwin.on_cursor
