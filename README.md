@@ -345,7 +345,8 @@ video in the history opens the video editor:
 - **Start here** (I) and **End here** (O) remove everything before or after
   the playhead.
 - **Crop** (C) draws a box over the video. Pick a shape (16:9, 9:16, 1:1, …)
-  or keep it free. **Remove black bars** finds the box for you.
+  or keep it free. **Remove black bars** finds the box for you. Outside crop
+  mode the preview shows only the cropped part, as it will be exported.
 - Space plays and pauses. Left and Right step one frame, and Shift steps
   faster. Ctrl+Z undoes.
 - **Export…** (Ctrl+E) opens the convert window with your cuts and crop, so

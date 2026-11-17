@@ -122,7 +122,8 @@ class Player(QObject):
 
 
 class VideoView(QWidget):
-    """The current frame, fitted, with the crop box over it (editable in crop mode)."""
+    """The current frame, fitted.  In crop mode the whole frame shows with the crop box over it;
+    otherwise only the cropped part shows, as it will look in the export."""
     crop_changed = pyqtSignal(object)      # (x, y, w, h) in video pixels, on release
 
     HANDLE = 7
@@ -146,8 +147,14 @@ class VideoView(QWidget):
         self.image = img
         self.update()
 
+    def _shown(self):
+        """The part of the video on screen, in video pixels."""
+        if self.cut.crop and not self.cropping:
+            return self.cut.crop
+        return (0, 0, self.cut.width, self.cut.height)
+
     def _fit(self):
-        W, H = self.cut.width, self.cut.height
+        _, _, W, H = self._shown()
         k = min((self.width() - 16) / W, (self.height() - 16) / H)
         w, h = W * k, H * k
         return QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h), k
@@ -170,11 +177,13 @@ class VideoView(QWidget):
         r, _ = self._fit()
         if self.image is not None:
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            p.drawImage(r, self.image)
+            x, y, w, h = self._shown()
+            k = self.image.width() / self.cut.width        # frames are scaled to the preview size
+            p.drawImage(r, self.image, QRectF(x * k, y * k, w * k, h * k))
         box = self.box()
-        if box:
+        if box and self.cropping:
             b = self._to_view(box)
-            shade = QColor(0, 0, 0, 150 if self.cropping else 200)
+            shade = QColor(0, 0, 0, 150)
             for part in (QRectF(r.left(), r.top(), r.width(), b.top() - r.top()),
                          QRectF(r.left(), b.bottom(), r.width(), r.bottom() - b.bottom()),
                          QRectF(r.left(), b.top(), b.left() - r.left(), b.height()),
@@ -618,6 +627,7 @@ class VideoEditor(QMainWindow):
         box = result.get("box")
         if box:
             self._apply(self.cut.set_crop(box))
+            self.crop_act.setChecked(False)      # show the result, not the box
             self.statusBar().showMessage(f"Black bars removed: {box[2]}×{box[3]} left.", 5000)
         else:
             self.statusBar().showMessage(result.get("error") or "No black bars found.", 5000)
