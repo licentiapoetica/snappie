@@ -117,7 +117,8 @@ class ScrollBarOsd(QWidget):
 class AreaBorder(QWidget):
     """Dashed frame just outside the recorded area: shows what's being recorded without being
     in the recording (region streams only see the area; window streams only the window).
-    Click-through; red while recording, amber while paused."""
+    Click-through; red while recording, amber while paused. `ready`: the area is chosen but the
+    recording hasn't started (sound chooser, delay), drawn like the picker's selection."""
     TITLE = "Snappie — recording area"
     MARGIN = 3       # logical px between the window edge and the area: 2 px line + 1 px gap
 
@@ -128,6 +129,7 @@ class AreaBorder(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.paused = False
+        self.ready = False
 
     @classmethod
     def outer(cls, rect):
@@ -140,10 +142,18 @@ class AreaBorder(QWidget):
         self.paused = on
         self.update()
 
+    def set_ready(self, on):
+        self.ready = on
+        self.update()
+
     def paintEvent(self, _):
         from PyQt6.QtGui import QPen
         p = QPainter(self)
         r = self.rect().adjusted(1, 1, -1, -1)
+        if self.ready:
+            p.setPen(QPen(ACCENT, 2))
+            p.drawRect(r)
+            return
         p.setPen(QPen(QColor(255, 255, 255, 220), 2))    # light gaps: visible on dark content
         p.drawRect(r)
         pen = QPen(QColor("#fdbc4b") if self.paused else QColor("#da4453"), 2)

@@ -107,6 +107,7 @@ class Recording:
             fx, fy = self.sel.win["frame"][:2]
             rect, target = (r.x() - fx, r.y() - fy, r.width(), r.height()), self.sel.win["id"]
         self.kwin.place(SoundChooser.TITLE, rect, target, mode="below", activate=True)
+        self._show_border(rect, target, ready=True)  # keep the picked area outlined while choosing
 
     def _close_chooser(self):
         if self.chooser:
@@ -169,6 +170,8 @@ class Recording:
             _, _, aw, ah = CODECS.get(self.codec, (0, 0, 2, 2))
             self.ref = self.rect = _grow_to_alignment(rect, aw, ah, scr.geometry())
             self.stream_args = cast.region_args(*self.rect, scr.devicePixelRatio(), pointer)
+            if self.rect != rect:  # grown over the outline: it would be in the first frames
+                self._hide_border()
         self.scale = scr.devicePixelRatio()
         self._connect()
         return False
@@ -295,10 +298,22 @@ class Recording:
         self.controls.show()
         rect, target = self._area_for_kwin()
         self.kwin.place(TITLE, rect, target, mode="below")
+        self._show_border(rect, target)
+
+    def _show_border(self, rect, target, ready=False):
         from .osd import AreaBorder
-        self.border = AreaBorder()
+        if not self.border:
+            self.border = AreaBorder()
+        self.border.set_ready(ready)
         self.border.show()
         self.kwin.place(AreaBorder.TITLE, AreaBorder.outer(rect), target, mode="exact", pinned=True)
+
+    def _hide_border(self):
+        if self.border:
+            self.kwin.unplace(self.border.TITLE)
+            self.border.hide()
+            self.border.deleteLater()
+            self.border = None
 
     def _area_for_kwin(self):
         """(rect, target id): the recorded area, relative to the window frame for window streams."""
@@ -311,11 +326,7 @@ class Recording:
     def _hide_controls(self):
         from .controls import TITLE
         self.kwin.unplace(TITLE)
-        if self.border:
-            self.kwin.unplace(self.border.TITLE)
-            self.border.hide()
-            self.border.deleteLater()
-            self.border = None
+        self._hide_border()
         if self.controls:
             self.controls.hide()
             self.controls.deleteLater()
@@ -587,6 +598,7 @@ class Recording:
             return
         self._ended = True
         self._close_chooser()
+        self._hide_border()
         if self.app_audio:
             self.app_audio.stop()
             self.app_audio = None
