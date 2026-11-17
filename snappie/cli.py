@@ -51,8 +51,8 @@ def build_parser():
         p.add_argument("file")
     p = sub.add_parser("upload", help="upload files with the chosen uploader (one after another)")
     p.add_argument("files", nargs="+", metavar="file")
-    p.add_argument("-u", "--uploader", help="an imported uploader (its file name) or an .sxcu file "
-                                            "(default: the one chosen in settings)")
+    p.add_argument("-u", "--uploader", help="an uploader from the settings (its name or file name), or an "
+                                            ".sxcu file (default: the one chosen in settings)")
     c = sub.add_parser("convert", help="convert a video to an animated GIF / WebP next to it")
     g = c.add_mutually_exclusive_group(required=True)
     g.add_argument("--gif", action="store_true")
@@ -106,7 +106,7 @@ def absolute_paths(argv):
     if argv and argv[0] in ("edit", "pin", "upload", "ocr", "convert"):
         out, value_of = argv[:1], None
         for a in argv[1:]:
-            if value_of:     # an imported uploader is a bare file name; an .sxcu path is a path
+            if value_of:     # an uploader is a bare name; an .sxcu path is a path
                 out.append(os.path.abspath(a) if os.sep in a else a)
                 value_of = None
             elif a in ("-u", "--uploader"):

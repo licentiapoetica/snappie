@@ -13,7 +13,8 @@ import time
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "snappie")
 DATA_DIR = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "snappie")
 SETTINGS = os.path.join(CONFIG_DIR, "settings.json")
-UPLOADERS_DIR = os.path.join(CONFIG_DIR, "uploaders")    # imported ShareX .sxcu files
+UPLOADERS_DIR = os.path.join(CONFIG_DIR, "uploaders")    # .sxcu files and set-up uploaders (.json)
+PLUGINS_DIR = os.path.join(DATA_DIR, "plugins")          # user uploader plugins (.py)
 HISTORY_FILE = os.path.join(DATA_DIR, "history.jsonl")
 THUMBS_DIR = os.path.join(DATA_DIR, "thumbs")
 CLIPBOARD_DIR = os.path.join(DATA_DIR, "clipboard")   # copy-only screenshots, kept for the history
@@ -69,6 +70,7 @@ DEFAULTS = {
     "upload.copy_url": True,              # copy the URL after uploading
     "upload.plasma_progress": False,      # also show uploads in Plasma's notification area (progress, cancel)
     "upload.trusted_certs": {},           # "host:port" -> SHA-256 of a trusted self-signed certificate
+    "upload.ssh_host_keys": {},           # known_hosts host -> "keytype base64" of a trusted SSH server
 
     # -- annotation defaults (the editor remembers the last used values) --
     "annot.color": "#e93d3d",

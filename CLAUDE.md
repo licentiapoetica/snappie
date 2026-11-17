@@ -27,7 +27,7 @@ Logs: stderr and `~/.local/state/snappie/snappie.log`.
 Runtime deps: python3-pyqt6 (incl. QtSvg), python3-dbus, PyGObject with GStreamer +
 GLib, numpy, gstreamer `pipewiresrc` and VA plugins (`vah265enc`/`vah264enc`/`vaav1enc`,
 `vapostproc`), libwayland-client, ffmpeg (GIF/WebP),
-optional tesseract (OCR), Noto Color Emoji font. libatspi via gi for the a11y picker.
+optional tesseract (OCR), OpenSSH client (SFTP uploads), Noto Color Emoji font. libatspi via gi for the a11y picker.
 Source builds/checkouts additionally need gcc + pkg-config + wayland-devel + wayland-scanner.
 
 ## Layout
@@ -48,7 +48,9 @@ Source builds/checkouts additionally need gcc + pkg-config + wayland-devel + way
 | `snappie/annotate/` | annotation: `Document` + `Canvas` engine, two hosts (`inplace.py` overlay, `window.py` editor) |
 | `snappie/livedraw.py` | drawing/click ripples/key bubbles on recordings; reads `/dev/input` (evdev) |
 | `snappie/scrollcap.py` | scrolling capture; `Stitcher` is plain numpy (testable offline) |
-| `snappie/upload.py` | ShareX `.sxcu` custom uploaders (incl. self-signed cert trust) |
+| `snappie/upload.py` | HTTP side: `.sxcu` engine, `request`/`post_file`, trusted servers (certs, SSH keys), `Uploader` thread |
+| `snappie/uploaders/` | uploader types as plugins (`sxcu`, `sftp` via OpenSSH's `sftp`, `command`) + user plugins, uploader files |
+| `snappie/uploader_editor.py` | the uploader form, generated from a plugin's `Field`s |
 | `snappie/transfers.py` | upload queue: progress, cancel, tray + Plasma job view (`org.kde.JobViewServer`) |
 | `snappie/servicemenu.py` | Dolphin right-click submenu (KIO service menus) |
 | `snappie/share_plugin.py`, `snappie/purpose/` | KDE Share menu plugin (KF6 Purpose, C++) built on the user's machine; D-Bus activation |
@@ -109,7 +111,8 @@ clear message instead of a crash. X11 and non-KDE desktops are out of scope.
 Use **pytest** with tests in `tests/`. Write tests for new or changed logic that doesn't
 need a live desktop: `scrollcap.Stitcher`, `visual.py`, `upload.py` (.sxcu parsing and
 `{json:…}`/`{regex:…}` syntax), `ocr` layout, `settings`, `cli` parsing, `migrate`
-(with temp dirs via `XDG_*` env vars). Anything touching KWin, PipeWire or real windows
+(with temp dirs via `XDG_*` env vars), `uploaders` (plugins, command, SFTP against a throwaway
+unprivileged `sshd` on localhost; skipped without one). Anything touching KWin, PipeWire or real windows
 is verified by running the app on the live Plasma session.
 
 **Never start nested/virtual sessions (`kwin_wayland --virtual`, extra dbus/at-spi) with the

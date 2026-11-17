@@ -22,8 +22,8 @@ KDE Plasma 6 (Wayland), Python 3 with PyQt6, dbus-python, PyGObject, NumPy and
 Requests, GStreamer with the PipeWire, base, good and VA plugins, ffmpeg, and
 the Wayland client library. Source installs also need gcc + Wayland headers
 to build the capture helper. Optional: tesseract (OCR),
-python-evdev (clicks and keys in recordings), and CMake, a C++ compiler and the
-KF6 Purpose headers (the Share menu entry).
+python-evdev (clicks and keys in recordings), the OpenSSH client (SFTP uploads),
+and CMake, a C++ compiler and the KF6 Purpose headers (the Share menu entry).
 
 `snappie deps` checks all of it and prints the install command for your distro;
 `install.sh` runs it first. On Arch and its derivatives:
@@ -180,8 +180,25 @@ wheel zooms), and OCR. Pick the defaults in Settings. Every capture lands in the
 or delete. Opening a screenshot there opens it in Snappie's editor. That includes screenshots you only copied: Snappie keeps a copy in
 `~/.local/share/snappie/clipboard/` and removes it when the history entry goes.
 
-**Uploads** use ShareX custom uploaders: import any `.sxcu` file (Zipline,
-XBackBone, catbox, …) in Settings → Uploads. The link is copied when done.
+**Uploads** go to the uploaders you add in Settings → Uploads → **Add**:
+
+- **ShareX custom uploaders:** import any `.sxcu` file (Zipline, XBackBone,
+  catbox, …).
+- **SFTP:** copies the file into a folder on your server over SSH. You give the
+  folder's web address, and the link (`https://example.com/i/` + the file name)
+  is copied like for any upload. It runs your
+  system's `sftp`, so your SSH keys, ssh-agent and `~/.ssh/config` work as
+  usual; a password works too. File names can be random, so links can't be
+  guessed.
+- **Command:** runs a program for each file, such as rclone, scp, s3cmd, curl
+  or your own script. `{file}` is the path, `{filename}` the name,
+  `{random}` a random name. The link is a template you set, or the last URL the
+  program prints.
+- **Plugins** for any other service: a short Python file in
+  `~/.local/share/snappie/plugins/`. See
+  [docs/uploader-plugins.md](docs/uploader-plugins.md).
+
+The link is copied when done.
 Several files upload one after another; when they're done, all the links are
 copied. While uploading, the tray icon shows the percentage; cancel from the
 tray menu. Settings → Uploads can also show it in Plasma's notifications, with
@@ -191,6 +208,10 @@ To check an uploader, use **Test Upload**, then **Show Response…** to see what
 the server answered: status, headers and body. A JSON body shows as a tree;
 click a value to get its `{json:…}` path. You can also try any expression
 (`{json:…}`, `{regex:…}`, `{header:…}`) against the response.
+
+The first upload to a server with a self-signed certificate, or to an SSH
+server that isn't in `~/.ssh/known_hosts`, asks whether to trust it and shows
+its fingerprint. **Trusted Servers…** lists them and can remove them.
 
 **Sounds** for a screenshot, the start and end of a recording, a finished
 upload, or an error can be turned on in Settings → Sounds. They come from your
@@ -265,7 +286,8 @@ There are two ways to find what's inside a window:
 ## Files
 
 Settings: `~/.config/snappie/settings.json`; uploaders:
-`~/.config/snappie/uploaders/`; history and thumbnails:
+`~/.config/snappie/uploaders/` (readable only by you when they hold a password);
+uploader plugins: `~/.local/share/snappie/plugins/`; history and thumbnails:
 `~/.local/share/snappie/`.
 
 Coming from the old name (`screenrec`)? The first start of Snappie moves your

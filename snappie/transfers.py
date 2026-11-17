@@ -267,11 +267,8 @@ class PlasmaJob:
 
 
 def uploader_label(name):
-    name = name or settings.get("upload.uploader") or ""
-    for fname, display in upload.list_uploaders():
-        if fname == name:
-            return display
-    return os.path.splitext(os.path.basename(name))[0] or "uploader"
+    from . import uploaders
+    return uploaders.label(name)
 
 
 def human_size(n):

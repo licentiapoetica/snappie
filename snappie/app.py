@@ -784,11 +784,11 @@ class App(QObject):
     def upload(self, paths, uploader=None, on_done=None):
         """Queue files for upload (a path or a list of paths). on_done(urls, error) runs once
         these files are done (the D-Bus method answers with it)."""
-        from . import upload
+        from . import uploaders
         if isinstance(paths, str):
             paths = [paths]
-        if not uploader and not settings.get("upload.uploader") and not upload.list_uploaders():
-            self.notifier.notify("No uploader set up", "Import a ShareX .sxcu uploader in Settings → Uploads",
+        if not uploader and not settings.get("upload.uploader") and not uploaders.entries():
+            self.notifier.notify("No uploader set up", "Add an uploader in Settings → Uploads",
                                  icon="dialog-information", actions=[("Settings", self.show_settings)])
             if on_done:
                 on_done([], "No uploader set up in Snappie")
@@ -854,19 +854,21 @@ class App(QObject):
         if copy and urls:
             copy_text(self.bus, "\n".join(urls))
 
-        # untrusted certificates: one notification per server, retrying its files
+        # untrusted servers (self-signed certificate, unknown SSH host key): one notification per
+        # server, retrying its files
         untrusted = {}
         for j in failed:
             e = j.exception
-            if isinstance(e, upload.UntrustedCertificate) and e.fingerprint:
-                untrusted.setdefault((e.host, e.port, e.fingerprint), []).append(j)
-        for (host, port, fp), js in untrusted.items():
-            def trust_and_retry(host=host, port=port, fp=fp, js=js):
-                upload.trust_certificate(host, port, fp)
+            if isinstance(e, upload.Untrusted) and e.can_trust:
+                untrusted.setdefault(e.key, []).append(j)
+        for js in untrusted.values():
+            def trust_and_retry(js=js):
+                js[0].exception.trust()
                 for u in {j.uploader for j in js}:
                     self.upload([j.path for j in js if j.uploader == u], u)
-            self.notifier.notify("Upload blocked: untrusted certificate", str(js[0].exception),
-                                 icon="security-low", actions=[("Trust certificate & retry", trust_and_retry)],
+            e = js[0].exception
+            self.notifier.notify(f"Upload blocked: {e.title.lower()}", str(e), icon="security-low",
+                                 actions=[(e.retry_label, trust_and_retry)],
                                  timeout=0)
         failed = [j for j in failed if not any(j in js for js in untrusted.values())]
 

@@ -67,6 +67,8 @@ DEPS = [
         feature="text recognition (OCR)"),
     Dep("evdev", "python-evdev", "python", ["evdev"], _p("python-evdev", "python3-evdev"),
         feature="showing clicks and keys in recordings"),
+    Dep("openssh", "OpenSSH client", "cmd", ["ssh", "sftp"], _p("openssh", "openssh-clients"),
+        feature="SFTP uploads"),
     # building the Share menu plugin (snappie/purpose/, share_plugin.py)
     Dep("cmake", "CMake", "cmd", ["cmake"], _p("cmake", "cmake"), feature="the Share menu entry"),
     Dep("c++", "a C++ compiler", "cmd", ["c++"], _p("gcc", "gcc-c++"), feature="the Share menu entry"),

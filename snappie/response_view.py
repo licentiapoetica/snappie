@@ -46,12 +46,13 @@ def _summary(v):
 
 class ResponseDialog(QDialog):
     def __init__(self, response, cfg, filename="", parent=None):
-        """response: a requests.Response; cfg: the normalized uploader config (upload.resolve)."""
+        """response: a requests.Response; cfg: the normalized .sxcu config (upload.load_config), or None
+        for other uploaders (plugins that use upload.request)."""
         super().__init__(parent)
         self.setWindowTitle("Snappie — upload response")
         self.setWindowIcon(QIcon.fromTheme("network-server"))
         self.resize(760, 680)
-        self.syn = upload.Syntax(filename=filename, uploader_name=str(cfg.get("Name") or ""))
+        self.syn = upload.Syntax(filename=filename, uploader_name=str((cfg or {}).get("Name") or ""))
         self.syn.response = response
         text = response.text or ""
         try:
@@ -91,18 +92,19 @@ class ResponseDialog(QDialog):
         tabs.addTab(_text_view("\n".join(f"{k}: {val}" for k, val in response.headers.items())), "Headers")
         v.addWidget(tabs, 1)
 
-        box = QGroupBox("This uploader reads")
-        form = QFormLayout(box)
-        for key, label in FIELDS:
-            if cfg.get(key):
-                form.addRow(label + ":", self._result_label(cfg[key]))
-        if not cfg.get("URL"):
-            form.addRow("URL:", self._result_label("", "(no URL field: the whole response is the link)"))
-        v.addWidget(box)
+        if cfg is not None:
+            box = QGroupBox("This uploader reads")
+            form = QFormLayout(box)
+            for key, label in FIELDS:
+                if cfg.get(key):
+                    form.addRow(label + ":", self._result_label(cfg[key]))
+            if not cfg.get("URL"):
+                form.addRow("URL:", self._result_label("", "(no URL field: the whole response is the link)"))
+            v.addWidget(box)
 
         box = QGroupBox("Try an expression")
         bv = QVBoxLayout(box)
-        self.expr = QLineEdit(cfg.get("URL") or "")
+        self.expr = QLineEdit((cfg or {}).get("URL") or "")
         self.expr.setFont(_mono())
         self.expr.setPlaceholderText("{json:files[0].url}   {regex:https?://\\S+}   {header:Location}")
         self.expr.setClearButtonEnabled(True)

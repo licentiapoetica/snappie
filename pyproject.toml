@@ -42,7 +42,7 @@ build_py = "build_support.BuildPy"
 bdist_wheel = "build_support.LinuxWheel"
 
 [tool.setuptools.packages.find]
-include = ["snappie", "snappie.annotate"]
+include = ["snappie", "snappie.annotate", "snappie.uploaders"]
 namespaces = false
 
 [tool.setuptools.package-data]

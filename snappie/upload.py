@@ -1,4 +1,9 @@
-"""Upload files through ShareX custom uploaders (.sxcu JSON files).
+"""HTTP uploads: the ShareX custom uploader engine (.sxcu) and what all uploaders share.
+
+The uploader types themselves (.sxcu, SFTP, commands, user plugins) and the uploader
+files are in `uploaders/`; this module has the errors, UploadResult, trusted servers,
+streamed request bodies, `request()`/`post_file()` for HTTP plugins, and `Uploader`, which
+runs an upload in a thread.
 
 An .sxcu describes one HTTP request (method, URL, query, headers, body) and
 how to read the result out of the response.  Values may contain ShareX's
@@ -6,19 +11,19 @@ syntax: `{json:files[0].url}`, `{regex:pattern|1}`, `{header:Location}`,
 `{filename}`, ... (ShareX >= 13).  Older files use `$json:...$` instead;
 those are converted on load, the same way ShareX migrates them.
 
-Only the .sxcu format is supported, no built-in hosts: people already have
-.sxcu files for the hosts they use (catbox, 0x0, zipline, xbackbone, ...).
+There are no built-in hosts: people already have .sxcu files for the hosts they
+use (catbox, 0x0, zipline, xbackbone, ...).
 """
 
 import base64
 import binascii
+import html
 import io
 import json
 import mimetypes
 import os
 import random
 import re
-import shutil
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -43,15 +48,76 @@ class Cancelled(UploadError):
         super().__init__("Upload cancelled")
 
 
-class UntrustedCertificate(UploadError):
+class Untrusted(UploadError):
+    """A server that can't be verified yet: a self-signed TLS certificate, an unknown SSH host key.
+    The user may trust it (trust() remembers it) and retry.  The texts are for the prompt."""
+    title = "Untrusted server"
+    question = ""            # HTML: what's wrong
+    advice = ""              # HTML: what trusting means
+    button = "Trust"         # in the prompt
+    retry_label = "Trust & retry"   # in a notification
+    fingerprint_label = ""
+    fingerprint_text = ""
+
+    @property
+    def key(self):
+        """Same server, same key: one prompt for several failed files."""
+        return (type(self).__name__, self.where, self.fingerprint_text)
+
+    @property
+    def can_trust(self):
+        return bool(self.fingerprint_text)
+
+    def trust(self):
+        raise NotImplementedError
+
+
+class UntrustedCertificate(Untrusted):
     """The server's TLS certificate isn't trusted (self-signed, private CA). `fingerprint` is the
-    SHA-256 of the certificate the server presented; trust_certificate() pins it."""
+    SHA-256 of the certificate the server presented; trust() pins it."""
+    title = "Untrusted certificate"
+    button = "Trust This Certificate"
+    retry_label = "Trust certificate & retry"
+    fingerprint_label = "SHA-256"
 
     def __init__(self, host, port, fingerprint):
         self.host, self.port, self.fingerprint = host, port, fingerprint
-        where = host if port == 443 else f"{host}:{port}"
-        super().__init__(f"{where} has a certificate that isn't trusted (self-signed?)."
-                         + (f" SHA-256 fingerprint: {pretty_fingerprint(fingerprint)}" if fingerprint else ""))
+        self.where = host if port == 443 else f"{host}:{port}"
+        self.fingerprint_text = pretty_fingerprint(fingerprint) if fingerprint else ""
+        self.question = (f"<b>{html.escape(self.where)}</b> uses a certificate that isn't signed by a trusted "
+                         "authority — usually a self-signed certificate on your own server.")
+        self.advice = ("Only trust it if this is your server and the fingerprint is the one it should have. "
+                       "Uploads will then accept exactly this certificate for this server (if it ever changes, "
+                       "they stop until you trust the new one).")
+        super().__init__(f"{self.where} has a certificate that isn't trusted (self-signed?)."
+                         + (f" SHA-256 fingerprint: {self.fingerprint_text}" if fingerprint else ""))
+
+    def trust(self):
+        trust_certificate(self.host, self.port, self.fingerprint)
+
+
+class UnknownHostKey(Untrusted):
+    """An SSH server that isn't in ~/.ssh/known_hosts nor trusted in Snappie. `host` is in
+    known_hosts form ("example.com", "[example.com]:2222"); trust() remembers the key."""
+    title = "Unknown SSH server"
+    button = "Trust This Server"
+    retry_label = "Trust server & retry"
+
+    def __init__(self, host, keytype, key_b64):
+        self.host, self.keytype, self.key_b64 = host, keytype, key_b64
+        self.where = host[1:].replace("]:", ":") if host.startswith("[") else host
+        self.fingerprint_label = f"{_key_name(keytype)} key fingerprint"
+        self.fingerprint_text = ssh_fingerprint(key_b64)
+        self.question = (f"<b>{html.escape(self.where)}</b> isn't one of your known SSH servers yet, so Snappie "
+                         "can't tell it's really that server.")
+        self.advice = ("Only trust it if the fingerprint matches the server's own (on the server: "
+                       "<tt>ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub</tt>). If the key ever changes, "
+                       "uploads stop until you trust the new one.")
+        super().__init__(f"{self.where} is an unknown SSH server. {self.fingerprint_label}: "
+                         f"{self.fingerprint_text}")
+
+    def trust(self):
+        trust_host_key(self.host, self.keytype, self.key_b64)
 
 
 # -- trusted (pinned) certificates -------------------------------------------
@@ -78,6 +144,41 @@ def untrust_certificate(host, port):
 def pretty_fingerprint(fp):
     fp = fp.upper()
     return ":".join(fp[i:i + 2] for i in range(0, len(fp), 2))
+
+
+# -- trusted SSH host keys --------------------------------------------------------
+#
+# Used along with ~/.ssh/known_hosts (which Snappie only reads). Stored as known_hosts
+# entries: host ("[host]:port" when not 22) -> "keytype base64".
+
+def trusted_host_keys():
+    t = settings.get("upload.ssh_host_keys") or {}
+    return t if isinstance(t, dict) else {}
+
+
+def trust_host_key(host, keytype, key_b64):
+    settings.set("upload.ssh_host_keys", dict(trusted_host_keys(), **{host: f"{keytype} {key_b64}"}))
+
+
+def untrust_host_key(host):
+    t = trusted_host_keys()
+    t.pop(host, None)
+    settings.set("upload.ssh_host_keys", t)
+
+
+def ssh_fingerprint(key_b64):
+    """OpenSSH's form: SHA256:<base64 without padding>."""
+    import hashlib
+    try:
+        blob = base64.b64decode(key_b64)
+    except (ValueError, binascii.Error):
+        return ""
+    return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
+
+
+def _key_name(keytype):
+    return {"ssh-ed25519": "ED25519", "ssh-rsa": "RSA", "ssh-dss": "DSA"}.get(
+        keytype, "ECDSA" if keytype.startswith("ecdsa") else keytype)
 
 
 def server_fingerprint(host, port, timeout=10):
@@ -137,9 +238,10 @@ class UploadResult:
         return f"UploadResult({self.url!r}, delete_url={self.delete_url!r})"
 
 
-# -- uploader files ---------------------------------------------------------
+# -- .sxcu files ---------------------------------------------------------------
 
-def _read_json(path):
+def read_sxcu(path):
+    """The raw config of an .sxcu file (see uploaders/ for the uploader list)."""
     try:
         with open(path, encoding="utf-8-sig") as f:   # ShareX writes a BOM sometimes
             data = json.load(f)
@@ -150,56 +252,6 @@ def _read_json(path):
     if not isinstance(data, dict) or not data.get("RequestURL"):
         raise UploadError(f"{os.path.basename(path)} is not a ShareX custom uploader (no RequestURL)")
     return data
-
-
-def list_uploaders():
-    """[(file name, display name)] of the imported uploaders, sorted by display name."""
-    out = []
-    try:
-        names = os.listdir(settings.UPLOADERS_DIR)
-    except OSError:
-        return []
-    for name in names:
-        if not name.lower().endswith((".sxcu", ".json")):
-            continue
-        try:
-            cfg = _read_json(os.path.join(settings.UPLOADERS_DIR, name))
-        except UploadError:
-            continue
-        out.append((name, str(cfg.get("Name") or os.path.splitext(name)[0])))
-    return sorted(out, key=lambda t: t[1].lower())
-
-
-def import_sxcu(path):
-    """Copy an .sxcu into UPLOADERS_DIR (replacing one with the same name).
-
-    The first imported uploader becomes the default."""
-    cfg = _read_json(path)
-    base = os.path.basename(path)
-    if not base.lower().endswith(".sxcu"):
-        base = os.path.splitext(base)[0] + ".sxcu"
-    base = re.sub(r"[^\w.\- ()]+", "_", base)
-    os.makedirs(settings.UPLOADERS_DIR, exist_ok=True)
-    dest = os.path.join(settings.UPLOADERS_DIR, base)
-    if os.path.abspath(path) != os.path.abspath(dest):
-        shutil.copyfile(path, dest)
-    if not settings.get("upload.uploader"):
-        settings.set("upload.uploader", base)
-    load_config(cfg)  # fail early on configs we can't use
-    return base
-
-
-def remove_uploader(name):
-    try:
-        os.remove(os.path.join(settings.UPLOADERS_DIR, name))
-    except FileNotFoundError:
-        pass
-    if settings.get("upload.uploader") == name:
-        settings.set("upload.uploader", "")
-
-
-def uploader_path(name):
-    return name if os.path.isabs(name) else os.path.join(settings.UPLOADERS_DIR, name)
 
 
 # -- config normalization (old ShareX versions) ------------------------------
@@ -543,19 +595,6 @@ def _excerpt(text, n=200):
     return text[:n] + ("…" if len(text) > n else "")
 
 
-def resolve(name=None):
-    """Load an uploader config by file name / path ("" or None = the default)."""
-    name = name or settings.get("upload.uploader")
-    if not name:
-        raise UploadError("No uploader chosen. Import a ShareX .sxcu file in Settings → Uploads.")
-    if isinstance(name, dict):
-        return load_config(name)
-    path = uploader_path(name)
-    if not os.path.exists(path):
-        raise UploadError(f"Uploader {name} not found (was it removed?)")
-    return load_config(_read_json(path))
-
-
 # -- request body --------------------------------------------------------------
 
 class StreamBody:
@@ -651,16 +690,79 @@ def multipart_body(fields, file_field, filename, path, mime, progress=None, canc
     return StreamBody([head, path, tail], progress, cancel), f"multipart/form-data; boundary={boundary}"
 
 
-def upload(path, uploader=None, session=None, progress=None, cancel=None):
-    """Upload `path` and return an UploadResult (blocking).
-
-    uploader: file name in UPLOADERS_DIR, a path, a config dict, or None for the
-    default from settings.  session: something with requests' `request()` (tests).
-    progress(sent, total): called from this thread while the file is sent (multipart and binary
-    bodies).  cancel: a threading.Event; setting it stops sending and raises Cancelled."""
+def request(method, url, session=None, **kw):
+    """requests' request() with Snappie's timeouts, trusted self-signed certificates and readable
+    errors (UploadError, UntrustedCertificate). Doesn't check the status code."""
     import requests
 
-    cfg = resolve(uploader)
+    kw.setdefault("timeout", TIMEOUT)
+    headers = kw.setdefault("headers", {})
+    if not any(k.lower() == "user-agent" for k in headers):
+        headers["User-Agent"] = USER_AGENT
+    http = session or requests
+    host, port = _host_port(url)
+    pinned = _trusted().get(f"{host}:{port}") if url.lower().startswith("https:") else None
+    if pinned and session is None:
+        http = _pinned_session(host, port, pinned)
+    try:
+        return http.request(method, url, **kw)
+    except requests.exceptions.SSLError as e:
+        if pinned or "CERTIFICATE_VERIFY_FAILED" in str(e) or "fingerprint" in str(e).lower():
+            try:
+                fp = server_fingerprint(host, port)
+            except OSError:
+                fp = ""
+            if pinned and fp and fp != pinned:
+                raise UploadError(f"The certificate of {host} changed since you trusted it. If you expected "
+                                  f"that, remove the old one in Settings → Uploads → Trusted Servers. "
+                                  f"New SHA-256: {pretty_fingerprint(fp)}") from None
+            raise UntrustedCertificate(host, port, fp) from None
+        raise UploadError(f"Secure connection to {_host(url)} failed: {_reason(e)}") from None
+    except requests.exceptions.Timeout:
+        raise UploadError(f"{_host(url)} did not answer in time") from None
+    except requests.exceptions.ConnectionError as e:
+        raise UploadError(f"Can't connect to {_host(url)}: {_reason(e)}") from None
+    except requests.exceptions.RequestException as e:
+        raise UploadError(f"Upload failed: {e}") from None
+
+
+def http_error(resp, message=""):
+    """UploadError for a failed response, with the server's answer attached."""
+    msg = message or _excerpt(resp.text)
+    err = UploadError(f"HTTP {resp.status_code} {resp.reason or ''}".strip() + (f": {msg}" if msg else ""))
+    err.response = resp
+    return err
+
+
+def post_file(url, path, field="file", fields=None, headers=None, method="POST", progress=None, cancel=None,
+              **kw):
+    """Send `path` as multipart/form-data (streamed, with progress and cancel), like a browser form.
+    Returns the requests.Response; raises UploadError for HTTP errors. For plugins."""
+    filename = os.path.basename(path)
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    try:
+        body, ctype = multipart_body({k: str(v) for k, v in (fields or {}).items()}, field, filename, path,
+                                     mime, progress, cancel)
+    except OSError as e:
+        raise UploadError(f"Can't read {path}: {e.strerror}") from None
+    headers = {k: v for k, v in (headers or {}).items() if k.lower() != "content-type"}
+    headers["Content-Type"] = ctype
+    try:
+        resp = request(method, url, headers=headers, data=body, **kw)
+    finally:
+        body.close()
+    if resp.status_code >= 400:
+        raise http_error(resp)
+    return resp
+
+
+def upload(path, cfg, session=None, progress=None, cancel=None):
+    """Upload `path` with an .sxcu config (a dict) and return an UploadResult (blocking).
+
+    session: something with requests' `request()` (tests).  progress(sent, total): called from
+    this thread while the file is sent (multipart and binary bodies).  cancel: a threading.Event;
+    setting it stops sending and raises Cancelled."""
+    cfg = load_config(cfg)
     filename = os.path.basename(path)
     syn = Syntax(filename=filename, uploader_name=str(cfg.get("Name") or ""))
     method, body = cfg["RequestMethod"], cfg["Body"]
@@ -695,42 +797,16 @@ def upload(path, uploader=None, session=None, progress=None, cancel=None):
     except OSError as e:
         raise UploadError(f"Can't read {path}: {e.strerror}") from None
 
-    http = session or requests
-    host, port = _host_port(url)
-    pinned = _trusted().get(f"{host}:{port}") if url.lower().startswith("https:") else None
-    if pinned and session is None:
-        http = _pinned_session(host, port, pinned)
     try:
-        resp = http.request(method, url, params=params or None, headers=headers, timeout=TIMEOUT,
-                            allow_redirects=cfg["_follow_redirects"], **kw)
-    except requests.exceptions.SSLError as e:
-        if pinned or "CERTIFICATE_VERIFY_FAILED" in str(e) or "fingerprint" in str(e).lower():
-            try:
-                fp = server_fingerprint(host, port)
-            except OSError:
-                fp = ""
-            if pinned and fp and fp != pinned:
-                raise UploadError(f"The certificate of {host} changed since you trusted it. If you expected "
-                                  f"that, remove the old exception in Settings → Uploads. New SHA-256: "
-                                  f"{pretty_fingerprint(fp)}") from None
-            raise UntrustedCertificate(host, port, fp) from None
-        raise UploadError(f"Secure connection to {_host(url)} failed: {_reason(e)}") from None
-    except requests.exceptions.Timeout:
-        raise UploadError(f"{_host(url)} did not answer in time") from None
-    except requests.exceptions.ConnectionError as e:
-        raise UploadError(f"Can't connect to {_host(url)}: {_reason(e)}") from None
-    except requests.exceptions.RequestException as e:
-        raise UploadError(f"Upload failed: {e}") from None
+        resp = request(method, url, session=session, params=params or None, headers=headers,
+                       allow_redirects=cfg["_follow_redirects"], **kw)
     finally:
         if stream:
             stream.close()
 
     syn.response = resp
     if resp.status_code >= 400:
-        msg = syn.render(cfg.get("ErrorMessage") or "").strip() or _excerpt(resp.text)
-        err = UploadError(f"HTTP {resp.status_code} {resp.reason or ''}".strip() + (f": {msg}" if msg else ""))
-        err.response = resp
-        raise err
+        raise http_error(resp, syn.render(cfg.get("ErrorMessage") or "").strip())
 
     result = syn.render(cfg.get("URL") or "").strip() if cfg.get("URL") else resp.text.strip()
     if not result:
@@ -760,7 +836,7 @@ def _reason(e):
 # -- Qt wrapper -----------------------------------------------------------------
 
 class Uploader(QObject):
-    """Runs upload() in a thread; `progress` and `finished` arrive on the GUI thread."""
+    """Runs uploaders.upload() in a thread; `progress` and `finished` arrive on the GUI thread."""
 
     finished = pyqtSignal(object, str)   # (UploadResult | None, error text)
     progress = pyqtSignal(object, object)   # bytes sent, total (Python ints: files can be > 2 GiB)
@@ -779,6 +855,7 @@ class Uploader(QObject):
         self._progress.connect(self.progress, Qt.ConnectionType.QueuedConnection)
 
     def start(self, path, uploader=None):
+        """uploader: see uploaders.get() (None = the default)."""
         Uploader._running.add(self)
         threading.Thread(target=self._work, args=(path, uploader), daemon=True).start()
 
@@ -793,9 +870,10 @@ class Uploader(QObject):
             self._progress.emit(sent, total)
 
     def _work(self, path, uploader):
+        from . import uploaders
         self.error = self.response = None
         try:
-            res, err = upload(path, uploader, progress=self._report, cancel=self._cancel), ""
+            res, err = uploaders.upload(path, uploader, progress=self._report, cancel=self._cancel), ""
             self.response = res.http
         except UploadError as e:
             res, err = None, str(e)
