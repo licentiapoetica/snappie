@@ -12,7 +12,9 @@ LOG_FILE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.
 
 def log(*a):
     """To stderr and to LOG_FILE (kept small), so problems can be looked at afterwards."""
-    print("snappie:", *a, file=sys.stderr, flush=True)
+    background = sys.modules.get("snappie.background")
+    if not (background and background.started):  # stderr is console.log by then: don't log twice
+        print("snappie:", *a, file=sys.stderr, flush=True)
     try:
         import time
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)

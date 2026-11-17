@@ -138,6 +138,8 @@ def _main():
     startup = sys.modules.get("snappie.background")
     if startup is not None:
         GLib.idle_add(startup.ready)
+        if startup.detached:
+            GLib.timeout_add_seconds(600, startup.trim_console)
     try:
         return qapp.exec() or app.exit_code
     finally:

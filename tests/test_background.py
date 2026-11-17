@@ -6,6 +6,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -97,9 +98,44 @@ def test_forwarding_to_another_instance_reports_success(tmp_path):
     assert result.returncode == 0
 
 
-def test_startup_timeout_returns_error(tmp_path):
-    result = run_detached(tmp_path, "    time.sleep(5)\n    os._exit(0)", timeout=0.1)
-    assert result.returncode == 1 and "startup timed out" in result.stderr
+def test_slow_startup_is_left_running(tmp_path):
+    child = '''
+    time.sleep(1)
+    (Path(os.environ["XDG_STATE_HOME"]) / "survived").touch()
+    os._exit(0)
+'''
+    result = run_detached(tmp_path, child, timeout=0.1)
+    assert result.returncode == 0 and "still starting" in result.stderr
+    for _ in range(50):
+        if (tmp_path / "survived").exists():
+            break
+        time.sleep(0.1)
+    assert (tmp_path / "survived").exists()
+
+
+def test_console_log_rotates_while_running(tmp_path):
+    child = '''
+    background.CONSOLE_LIMIT = 10
+    print("x" * 20, flush=True)
+    background.trim_console()
+    print("after", flush=True)
+    background.finished(0)
+    os._exit(0)
+'''
+    assert run_detached(tmp_path, child).returncode == 0
+    assert (tmp_path / "snappie" / "console.log.1").read_text().startswith("x" * 20)
+    assert (tmp_path / "snappie" / "console.log").read_text() == "after\n"
+
+
+def test_log_lines_reach_console_only_until_started(monkeypatch, capsys):
+    from snappie import app_util
+    monkeypatch.setattr(app_util, "LOG_FILE", os.devnull)
+    monkeypatch.setattr(background, "started", False)
+    app_util.log("during startup")
+    monkeypatch.setattr(background, "started", True)
+    app_util.log("after startup")
+    err = capsys.readouterr().err
+    assert "during startup" in err and "after startup" not in err
 
 
 def test_log_directory_failure_is_reported(tmp_path):
