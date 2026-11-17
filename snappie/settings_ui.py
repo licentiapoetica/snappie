@@ -77,8 +77,9 @@ class _Folder(QWidget):
 class _ColorPicker(QWidget):
     """Palette swatches plus a custom colour; value is "#rrggbb"."""
 
-    def __init__(self):
+    def __init__(self, title="Annotation color"):
         super().__init__()
+        self.title = title
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
@@ -101,7 +102,7 @@ class _ColorPicker(QWidget):
         lay.addStretch(1)
 
     def _pick(self):
-        c = QColorDialog.getColor(QColor(self.color), self, "Annotation color")
+        c = QColorDialog.getColor(QColor(self.color), self, self.title)
         if c.isValid():
             self.setValue(c.name())
 
@@ -193,7 +194,7 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.addTab(_scroll(self._screenshots()), QIcon.fromTheme("camera-photo"), "Screenshots")
         self.tabs.addTab(_scroll(self._recording()), QIcon.fromTheme("media-record"), "Recording")
-        self.tabs.addTab(_scroll(self._gif()), QIcon.fromTheme("image-gif"), "GIF")
+        self.tabs.addTab(_scroll(self._gif()), QIcon.fromTheme("image-gif"), "GIF && Convert")
         self.tabs.addTab(self._uploads(), QIcon.fromTheme("cloud-upload"), "Uploads")
         self.tabs.addTab(_scroll(self._sounds()), QIcon.fromTheme("preferences-desktop-sound"), "Sounds")
         self.tabs.addTab(self._hotkeys(), QIcon.fromTheme("preferences-desktop-keyboard"), "Hotkeys")
@@ -371,8 +372,24 @@ class SettingsDialog(QDialog):
         width = self._bind("gif.max_width", QSpinBox(minimum=0, maximum=7680, singleStep=40, suffix=" px"))
         width.setSpecialValueText("Native width")
         form.addRow("Maximum width:", width)
+        form.addRow("Quality:", self._bind("gif.quality", QSpinBox(minimum=1, maximum=100)))
         form.addRow(_hint("Wider recordings are scaled down. GIFs get big quickly: 10–15 fps and "
-                          "960 px is a good balance."))
+                          "960 px is a good balance. Quality 80 or more keeps all 256 GIF colors; "
+                          "100 makes lossless WebP."))
+        v.addWidget(box)
+
+        box, form = _form("Converting to MP4 / WebM")
+        fps = self._bind("convert.video_fps", QSpinBox(minimum=0, maximum=120, suffix=" fps"))
+        fps.setSpecialValueText("As the source")
+        form.addRow("Frame rate:", fps)
+        width = self._bind("convert.video_max_width", QSpinBox(minimum=0, maximum=16384, singleStep=40,
+                                                                suffix=" px"))
+        width.setSpecialValueText("Keep")
+        form.addRow("Maximum width:", width)
+        form.addRow("Quality:", self._bind("convert.video_quality", QSpinBox(minimum=1, maximum=100)))
+        form.addRow("Behind transparency:", self._bind("convert.background", _ColorPicker("Background")))
+        form.addRow(_hint("Defaults for snappie convert, Dolphin's Convert entries and the video editor's "
+                          "export. The convert window can change them for one file."))
         v.addWidget(box)
         v.addStretch(1)
         return page
@@ -515,7 +532,7 @@ class SettingsDialog(QDialog):
         self.autostart = QCheckBox("Start Snappie with Plasma (in the system tray)")
         form.addRow(self.autostart)
         form.addRow(self._bind("dolphin_menu", QCheckBox(
-            "Snappie in Dolphin's right-click menu (upload, annotate, pin, OCR, convert to GIF)")))
+            "Snappie in Dolphin's right-click menu (upload, annotate, pin, OCR, cut, convert)")))
         form.addRow(self._bind("share_menu", QCheckBox(
             "“Upload with Snappie” in the Share menus of Spectacle, Gwenview, Okular, Dolphin…")))
         form.addRow(_hint(share_plugin.describe(share_plugin.status())))

@@ -351,25 +351,6 @@ def join_parts(parts, path):
     return path
 
 
-def to_animation(video, out_path, fps=15, max_width=960):
-    """Convert a recording to an optimized GIF or animated WebP (by out_path's extension).
-    Returns out_path, or raises RuntimeError."""
-    scale = f",scale='min({max_width},iw)':-2:flags=lanczos" if max_width else ""
-    if out_path.endswith(".webp"):
-        cmd = ["-vf", f"fps={fps}{scale}", "-c:v", "libwebp_anim", "-lossless", "0", "-quality", "80",
-               "-compression_level", "4", "-loop", "0", "-an"]
-    else:
-        # one palette for the whole clip, only changed rectangles re-dithered: small and stable
-        cmd = ["-vf", f"fps={fps}{scale},split[a][b];[a]palettegen=stats_mode=diff:max_colors=256[p];"
-                      "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
-               "-loop", "0", "-an"]
-    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", video, *cmd, out_path],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError("converting failed: " + (r.stderr.strip().splitlines() or ["ffmpeg error"])[-1])
-    return out_path
-
-
 def remux(mkv_path, codec, container="mp4"):
     """Fast lossless container change to MP4 (plays everywhere) or WebM (browsers).
     Returns the final path (the MKV if that fails)."""

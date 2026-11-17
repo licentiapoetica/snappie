@@ -9,7 +9,7 @@ def test_install_writes_executable_menus_once(tmp_path, monkeypatch):
     assert servicemenu.install("/opt/bin/snappie") is True
     assert servicemenu.install("/opt/bin/snappie") is False      # unchanged: nothing written
     names = sorted(os.listdir(tmp_path))
-    assert names == ["snappie-image.desktop", "snappie-upload.desktop", "snappie-video.desktop"]
+    assert names == sorted(f"snappie-{n}.desktop" for n in servicemenu.MENUS)
     for n in names:
         assert os.access(tmp_path / n, os.X_OK)
         cp = configparser.ConfigParser(interpolation=None)
@@ -21,6 +21,10 @@ def test_install_writes_executable_menus_once(tmp_path, monkeypatch):
     up = (tmp_path / "snappie-upload.desktop").read_text()
     assert "MimeType=all/allfiles;" in up and "Exec=/opt/bin/snappie upload %F" in up
     assert servicemenu.install("/other/snappie") is True          # a moved launcher is rewritten
+    (tmp_path / "snappie-old.desktop").write_text("")                # a menu an older version wrote
+    (tmp_path / "other.desktop").write_text("")                      # not ours
+    assert servicemenu.install("/other/snappie") is True
+    assert "snappie-old.desktop" not in os.listdir(tmp_path)
     servicemenu.uninstall()
-    assert os.listdir(tmp_path) == []
+    assert os.listdir(tmp_path) == ["other.desktop"]
     servicemenu.uninstall()                                       # nothing there: fine

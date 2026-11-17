@@ -46,18 +46,16 @@ def build_parser():
     sub.add_parser("scroll", help="scrolling capture of a window area")
     sub.add_parser("history", help="show the capture history")
     sub.add_parser("settings", help="open the settings")
-    for name, what in (("edit", "open an image in the editor"), ("pin", "pin an image on the screen")):
+    for name, what in (("edit", "open an image in the editor, or a video in the video editor (cut, crop)"), ("pin", "pin an image on the screen")):
         p = sub.add_parser(name, help=what)
         p.add_argument("file")
     p = sub.add_parser("upload", help="upload files with the chosen uploader (one after another)")
     p.add_argument("files", nargs="+", metavar="file")
     p.add_argument("-u", "--uploader", help="an uploader from the settings (its name or file name), or an "
                                             ".sxcu file (default: the one chosen in settings)")
-    c = sub.add_parser("convert", help="convert a video to an animated GIF / WebP next to it")
-    g = c.add_mutually_exclusive_group(required=True)
-    g.add_argument("--gif", action="store_true")
-    g.add_argument("--webp", action="store_true")
-    c.add_argument("file")
+    c = sub.add_parser("convert", help="convert between videos, GIF and animated WebP, cut, crop, change "
+                                        "speed (without a format: opens the convert window)")
+    _convert_args(c)
     sub.add_parser("quit", help="quit the tray app")
     sub.add_parser("service")   # no help: started by D-Bus activation, see share_plugin
     sub.add_parser("deps", help="check what Snappie needs from the system")
@@ -87,6 +85,82 @@ def _record_args(r):
     r.add_argument("--duration", type=float, help="stop automatically after N seconds")
 
 
+CONVERT_FORMATS = ["gif", "webp", "mp4", "webm"]
+CONVERT_VALUES = {"--to", "--fps", "--width", "--quality", "--start", "--end", "--cut", "--crop", "--speed",
+                  "--repeat", "--background"}     # options whose value is not a path
+
+
+def _convert_args(c):
+    g = c.add_mutually_exclusive_group()
+    g.add_argument("--to", choices=CONVERT_FORMATS, help="output format; saved next to the file")
+    for f in CONVERT_FORMATS:
+        g.add_argument(f"--{f}", dest="to", action="store_const", const=f, help=f"same as --to {f}")
+    c.add_argument("--fps", type=_ranged(int, 0, 120), help="frame rate (0 = as the source; "
+                                                            "default: settings)")
+    c.add_argument("--width", type=_ranged(int, 0, 16384), help="maximum width in pixels (0 = keep)")
+    c.add_argument("--quality", type=_ranged(int, 1, 100), help="1–100 (default: settings, 80)")
+    c.add_argument("--start", type=parse_time, help="start here (seconds, or M:SS)")
+    c.add_argument("--end", type=parse_time, help="end here (seconds, or M:SS)")
+    c.add_argument("--cut", type=_span, action="append", default=[], metavar="FROM-TO",
+                   help="remove this part, e.g. 0:05-0:12 (repeatable)")
+    c.add_argument("--crop", type=_crop, metavar="W:H:X:Y|auto", help="keep this area (auto: remove black bars)")
+    c.add_argument("--speed", type=_ranged(float, 0.1, 16), default=1.0, help="play faster (2) or slower (0.5)")
+    c.add_argument("--repeat", type=_ranged(int, 1, 50), default=1, help="play it N times (videos)")
+    c.add_argument("--background", metavar="COLOR", help="behind transparency in MP4/WebM, e.g. '#000000'")
+    c.add_argument("--no-audio", action="store_true", help="drop the sound")
+    c.add_argument("--reencode", action="store_true",
+                   help="always re-encode (by default a plain container change copies the streams)")
+    c.add_argument("-o", "--output", help="output file (default: next to the source, never overwriting)")
+    c.add_argument("file")
+
+
+def parse_time(text):
+    """Seconds from "12.5", "1:02.5" or "1:00:02"."""
+    try:
+        t = 0.0
+        for part in str(text).strip().split(":"):
+            t = t * 60 + float(part)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a time: {text!r}")
+    if t < 0:
+        raise argparse.ArgumentTypeError(f"not a time: {text!r}")
+    return t
+
+
+def _span(text):
+    a, sep, b = str(text).partition("-")
+    if not sep:
+        raise argparse.ArgumentTypeError(f"expected FROM-TO, like 0:05-0:12: {text!r}")
+    a, b = parse_time(a), parse_time(b)
+    if b <= a:
+        raise argparse.ArgumentTypeError(f"the end is before the start: {text!r}")
+    return a, b
+
+
+def _crop(text):
+    if text == "auto":
+        return text
+    try:
+        w, h, x, y = (int(v) for v in text.split(":"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected W:H:X:Y or auto: {text!r}")
+    if w < 2 or h < 2 or x < 0 or y < 0:
+        raise argparse.ArgumentTypeError(f"not an area: {text!r}")
+    return x, y, w, h
+
+
+def _ranged(kind, lo, hi):
+    def check(text):
+        try:
+            v = kind(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"not a number: {text!r}")
+        if not lo <= v <= hi:
+            raise argparse.ArgumentTypeError(f"must be {lo}–{hi}")
+        return v
+    return check
+
+
 def normalize(argv):
     """Old style `snappie [record options]` and `--stop` still work."""
     argv = list(argv)
@@ -106,9 +180,15 @@ def absolute_paths(argv):
     if argv and argv[0] in ("edit", "pin", "upload", "ocr", "convert"):
         out, value_of = argv[:1], None
         for a in argv[1:]:
-            if value_of:     # an uploader is a bare name; an .sxcu path is a path
+            if value_of in CONVERT_VALUES:
+                out.append(a)
+                value_of = None
+            elif value_of:     # an uploader is a bare name; an .sxcu path is a path
                 out.append(os.path.abspath(a) if os.sep in a else a)
                 value_of = None
+            elif argv[0] == "convert" and a in CONVERT_VALUES:
+                out.append(a)
+                value_of = a
             elif a in ("-u", "--uploader"):
                 out.append(a)
                 value_of = a

@@ -50,6 +50,9 @@ Source builds/checkouts additionally need gcc + pkg-config + wayland-devel + way
 | `snappie/helper/snappie-cast.c` | C helper: `zkde_screencast_unstable_v1` streams + `org_kde_kwin_fake_input` |
 | `snappie/recorder.py` | GStreamer pipeline: pipewiresrc → crop → VAAPI encode + Opus audio → MKV |
 | `snappie/recording.py` | one recording: segments (pause/reconnect), join, remux MP4 / convert GIF/WebP |
+| `snappie/convert.py` | ffmpeg conversions any ↔ any (GIF/WebP/MP4/WebM): cuts, crop, speed, black bars; `build` is pure |
+| `snappie/convert_dialog.py` | the convert window (also the video editor's export) |
+| `snappie/videoedit.py`, `videocut.py` | video editor (playbin preview, timeline, crop box); `VideoCut` is the Qt-free model |
 | `snappie/picker.py` | full-screen overlay to pick screen / window / inner area |
 | `snappie/a11y.py`, `snappie/visual.py` | inner areas from the AT-SPI tree, or from pixel edges |
 | `snappie/annotate/` | annotation: `Document` + `Canvas` engine, two hosts (`inplace.py` overlay, `window.py` editor) |
