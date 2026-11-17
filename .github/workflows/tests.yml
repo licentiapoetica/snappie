@@ -5,9 +5,15 @@ on:
     branches: [master]
   pull_request:
   workflow_call:
+    inputs:
+      skip_package:
+        # The release workflow builds and checks its own wheels.
+        type: boolean
+        default: false
 
 jobs:
   package:
+    if: ${{ !inputs.skip_package }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -26,42 +32,14 @@ jobs:
           python -m build
           test -z "$(find "$XDG_DATA_HOME" -mindepth 1 -print -quit)"
       - run: |
-          python -m venv /tmp/snappie-smoke
-          /tmp/snappie-smoke/bin/python -m pip install --no-deps dist/*.whl
+          python -m venv "$RUNNER_TEMP/snappie-smoke"
+          "$RUNNER_TEMP/snappie-smoke/bin/python" -m pip install --no-deps dist/*.whl
       # Run outside the checkout, without Python runtime dependencies or a desktop.
-      - working-directory: /tmp
+      - working-directory: ${{ runner.temp }}
         run: |
-          /tmp/snappie-smoke/bin/snappie --help
-          /tmp/snappie-smoke/bin/python - <<'PY'
-          import os
-          import subprocess
-          import sys
-          import tempfile
-          from importlib.resources import files
-
-          root = files("snappie")
-          for name in ("icons/snappie.svg", "icons/snappie-tray.svg"):
-              assert root.joinpath(name).is_file(), name
-          assert (root / "helper" / "snappie-cast").read_bytes().startswith(b"\x7fELF")
-          with tempfile.TemporaryDirectory() as data:
-              # No cc, pkg-config, wayland-scanner, or shell available through PATH.
-              env = dict(os.environ, XDG_DATA_HOME=data, PATH="")
-              subprocess.run([sys.executable, "-m", "snappie.capture_helper"], env=env, check=True)
-              assert os.access(os.path.join(data, "snappie", "snappie-cast"), os.X_OK)
-              assert os.path.isfile(os.path.join(data, "applications", "snappie-cast.desktop"))
-          PY
-      - run: |
-          python - <<'PY'
-          from pathlib import Path
-          import zipfile
-
-          wheels = list(Path("dist").glob("*.whl"))
-          assert len(wheels) == 1
-          assert "-py3-none-linux_" in wheels[0].name, wheels[0]
-          with zipfile.ZipFile(wheels[0]) as archive:
-              metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/WHEEL"))
-              assert "Root-Is-Purelib: false" in archive.read(metadata).decode()
-          PY
+          "$RUNNER_TEMP/snappie-smoke/bin/snappie" --help
+          "$RUNNER_TEMP/snappie-smoke/bin/python" "$GITHUB_WORKSPACE/.github/scripts/check-wheel.py" \
+            "$GITHUB_WORKSPACE"/dist/*.whl
 
   pytest:
     runs-on: ubuntu-24.04

@@ -13,7 +13,7 @@ def release_version(project, tag):
         raise ValueError(f"Use the normalized package version: {parsed}")
     if tag and tag != f"v{version}":
         raise ValueError(f"Tag {tag!r} must match package version v{version}")
-    return version, parsed.is_prerelease or parsed.is_devrelease
+    return version, parsed.is_prerelease  # also true for .dev versions
 
 
 if __name__ == "__main__":

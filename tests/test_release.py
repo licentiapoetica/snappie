@@ -40,6 +40,7 @@ def publisher(tmp_path):
     binaries = tmp_path / "bin"
     binaries.mkdir()
     gh = binaries / "gh"
+    # FAKE_GH_STATE is the tagged release, FAKE_GH_LATEST the repo's Latest one (a tag name).
     gh.write_text(f"#!{sys.executable}\n" + '''
 import json
 import os
@@ -48,10 +49,13 @@ with open(os.environ["GH_CALLS"], "a") as calls:
     calls.write(json.dumps(sys.argv[1:]) + "\\n")
 action = sys.argv[2]
 if action == "view":
-    state = os.environ["FAKE_GH_STATE"]
+    latest = sys.argv[3].startswith("--")
+    state = os.environ["FAKE_GH_LATEST" if latest else "FAKE_GH_STATE"]
     if state == "missing":
-        sys.exit(1)
-    print("true" if state == "draft" else "false")
+        sys.exit("release not found")
+    if state == "error":
+        sys.exit("HTTP 502: Bad Gateway")
+    print(state if latest else "true" if state == "draft" else "false")
 if action in ("create", "upload") and os.environ.get("FAKE_UPLOAD_FAIL"):
     sys.exit(2)
 ''')
@@ -62,11 +66,13 @@ if action in ("create", "upload") and os.environ.get("FAKE_UPLOAD_FAIL"):
         (dist / name).touch()
     log = tmp_path / "calls"
 
-    def run(state="missing", prerelease=False, fail_upload=False):
+    def run(state="missing", latest="missing", tag="v0.1.0", prerelease=False, fail_upload=False):
         env = dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}", GH_CALLS=str(log),
-                   FAKE_GH_STATE=state, RELEASE_TAG="v0.1.0", RELEASE_PRERELEASE=str(prerelease).lower())
+                   FAKE_GH_STATE=state, FAKE_GH_LATEST=latest, RELEASE_TAG=tag,
+                   RELEASE_PRERELEASE=str(prerelease).lower())
         if fail_upload:
             env["FAKE_UPLOAD_FAIL"] = "1"
+        log.write_text("")
         result = subprocess.run(["bash", str(SCRIPTS / "publish-release.sh")], cwd=tmp_path,
                                 env=env, capture_output=True, text=True)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
@@ -75,32 +81,60 @@ if action in ("create", "upload") and os.environ.get("FAKE_UPLOAD_FAIL"):
     return run
 
 
+def actions(calls):
+    return [call[1] for call in calls]
+
+
 def test_publishes_only_after_assets_are_uploaded(publisher):
     result, calls = publisher()
     assert result.returncode == 0, result.stderr
-    assert [call[1] for call in calls] == ["view", "create", "edit"]
+    assert actions(calls) == ["view", "create", "view", "edit"]
     assert "--draft" in calls[1] and "--verify-tag" in calls[1]
     assert "dist/test-x86_64.whl" in calls[1] and "dist/test-aarch64.whl" in calls[1]
     assert "dist/SHA256SUMS" in calls[1]
-    assert "--draft=false" in calls[2] and "--latest=true" in calls[2]
+    assert "--draft=false" in calls[-1] and "--latest=true" in calls[-1]
 
 
 def test_draft_upload_can_be_retried_without_marking_prerelease_latest(publisher):
     result, calls = publisher(state="draft", prerelease=True)
     assert result.returncode == 0, result.stderr
-    assert [call[1] for call in calls] == ["view", "upload", "edit"]
+    assert actions(calls) == ["view", "upload", "edit"]
     assert "--prerelease=true" in calls[-1] and "--latest=false" in calls[-1]
+
+
+@pytest.mark.parametrize("latest,tag,is_latest", [
+    ("v0.9.0", "v0.10.0", True),
+    ("v0.3.0", "v0.2.1", False),  # a patch for an older series
+    ("v0.2.0", "v0.2.0.post1", True),
+])
+def test_only_the_highest_version_becomes_latest(publisher, latest, tag, is_latest):
+    result, calls = publisher(latest=latest, tag=tag)
+    assert result.returncode == 0, result.stderr
+    assert f"--latest={str(is_latest).lower()}" in calls[-1]
 
 
 def test_published_releases_are_preserved(publisher):
     result, calls = publisher(state="published")
     assert result.returncode != 0
     assert "already published" in result.stderr
-    assert [call[1] for call in calls] == ["view"]
+    assert actions(calls) == ["view"]
+
+
+def test_lookup_errors_are_not_mistaken_for_a_missing_release(publisher):
+    result, calls = publisher(state="error")
+    assert result.returncode != 0
+    assert "502" in result.stderr
+    assert actions(calls) == ["view"]
+
+
+def test_latest_lookup_error_leaves_the_draft(publisher):
+    result, calls = publisher(latest="error")
+    assert result.returncode != 0
+    assert "edit" not in actions(calls)
 
 
 @pytest.mark.parametrize("state", ["missing", "draft"])
 def test_failed_upload_does_not_publish(publisher, state):
     result, calls = publisher(state=state, fail_upload=True)
     assert result.returncode != 0
-    assert "edit" not in [call[1] for call in calls]
+    assert "edit" not in actions(calls)

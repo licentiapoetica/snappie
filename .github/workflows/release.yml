@@ -12,6 +12,11 @@ on:
       - pyproject.toml
       - build_support.py
       - MANIFEST.in
+      # What the 22.04 and ARM64 builds and the installed-wheel check exercise.
+      - snappie/helper/**
+      - snappie/capture_helper.py
+      - snappie/icons/**
+      - snappie/purpose/**
 
 permissions:
   contents: read
@@ -40,6 +45,8 @@ jobs:
   tests:
     if: github.event_name != 'pull_request'
     uses: ./.github/workflows/tests.yml
+    with:
+      skip_package: true
 
   build:
     needs: version
@@ -60,13 +67,22 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwayland-dev libwayland-bin pkg-config
-          python -m pip install build
+          python -m pip install build wheel
       - name: Build wheel from source archive
         run: |
           export XDG_DATA_HOME="$RUNNER_TEMP/snappie-build-data"
           mkdir -p "$XDG_DATA_HOME"
           python -m build
           test -z "$(find "$XDG_DATA_HOME" -mindepth 1 -print -quit)"
+      # The helper needs the build system's glibc or newer; this tag lets pip refuse the
+      # wheel on older systems instead of the helper failing to load at capture time.
+      - name: Tag wheel with the minimum glibc
+        id: platform
+        run: |
+          glibc=$(python -c 'import platform; print(platform.libc_ver()[1].replace(".", "_"))')
+          tag="manylinux_${glibc}_${{ matrix.arch }}"
+          python -m wheel tags --remove --platform-tag "$tag" dist/*.whl
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Install into a clean environment
         run: |
           python -m venv "$RUNNER_TEMP/snappie-smoke"
@@ -76,9 +92,11 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ needs.version.outputs.version }}
           EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_PLATFORM: ${{ steps.platform.outputs.tag }}
         run: |
           "$RUNNER_TEMP/snappie-smoke/bin/snappie" --help
-          "$RUNNER_TEMP/snappie-smoke/bin/python" "$GITHUB_WORKSPACE/.github/scripts/check-wheel.py"
+          "$RUNNER_TEMP/snappie-smoke/bin/python" "$GITHUB_WORKSPACE/.github/scripts/check-wheel.py" \
+            "$GITHUB_WORKSPACE"/dist/*.whl
       - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.arch }}

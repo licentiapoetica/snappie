@@ -1,4 +1,10 @@
-"""Check release contents and helper setup with no build tools on PATH."""
+"""Check a built wheel, and the same wheel installed, with no build tools on PATH.
+
+Run with the installed environment's Python, outside the checkout:
+    check-wheel.py dist/snappie-….whl
+EXPECTED_VERSION, EXPECTED_ARCH and EXPECTED_PLATFORM (the wheel's platform tag) are
+checked when set; release builds set them.
+"""
 
 from importlib.metadata import version
 from importlib.resources import files
@@ -8,9 +14,21 @@ import platform
 import subprocess
 import sys
 import tempfile
+import zipfile
 
-assert version("snappie") == os.environ["EXPECTED_VERSION"]
-assert platform.machine() == os.environ["EXPECTED_ARCH"]
+wheel = Path(sys.argv[1])
+assert wheel.name.startswith("snappie-") and "-py3-none-" in wheel.name, wheel.name
+assert wheel.name.endswith(f"_{platform.machine()}.whl"), wheel.name
+if "EXPECTED_PLATFORM" in os.environ:
+    assert wheel.name.endswith(f"-{os.environ['EXPECTED_PLATFORM']}.whl"), wheel.name
+with zipfile.ZipFile(wheel) as archive:
+    metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/WHEEL"))
+    assert "Root-Is-Purelib: false" in archive.read(metadata).decode()
+
+if "EXPECTED_VERSION" in os.environ:
+    assert version("snappie") == os.environ["EXPECTED_VERSION"]
+if "EXPECTED_ARCH" in os.environ:
+    assert platform.machine() == os.environ["EXPECTED_ARCH"]
 root = files("snappie")
 assert Path(str(root)).is_relative_to(Path(sys.prefix)), root
 for asset in ("icons/snappie.svg", "icons/snappie-tray.svg", "purpose/CMakeLists.txt",
