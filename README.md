@@ -50,46 +50,38 @@ sudo zypper install cmake gcc-c++ kf6-purpose-devel kf6-kcoreaddons-devel qt6-db
 
 ## Python package installation
 
-Snappie can also be installed as a Python package, independently of the checkout.
-Install the system packages above first, then create a virtual environment that
-can use your distro's Python libraries:
+Snappie can also be installed as a Python package, without `install.sh` or a checkout.
+Download the wheel for your CPU from [GitHub Releases](https://github.com/licentiapoetica/snappie/releases):
+`x86_64` for Intel/AMD PCs or `aarch64` for ARM64. Release wheels need glibc 2.35
+or newer. They include the compiled capture helper, so you don't need gcc or the
+Wayland headers. You still need the other system packages listed above. The
+optional Share menu plugin isn't in the wheel; Snappie builds it on your computer
+when its packages are installed.
+
+Install it into a virtual environment that can use your distro's Python libraries:
 
 ```sh
-python3 -m venv --system-site-packages .venv
-.venv/bin/python -m pip install --no-deps .
-.venv/bin/snappie --help
-.venv/bin/snappie deps
+python3 -m venv --system-site-packages ~/.local/share/snappie/venv
+~/.local/share/snappie/venv/bin/python -m pip install --no-deps ~/Downloads/snappie-VERSION-py3-none-manylinux_2_35_x86_64.whl
+~/.local/share/snappie/venv/bin/snappie deps
+mkdir -p ~/.local/bin
+ln -sf ~/.local/share/snappie/venv/bin/snappie ~/.local/bin/snappie
+~/.local/share/snappie/venv/bin/python -c 'from snappie import hotkeys; hotkeys.install()'
 ```
 
-Installing from source builds the C capture helper once during packaging. The
-resulting wheel includes the `snappie` command, icons and compiled helper.
-Installing that wheel needs no compiler, pkg-config or Wayland headers:
+Use the name of the file you downloaded. `deps` lists anything still missing.
+The last line adds the launcher and the shortcut actions. Then start `snappie`
+and turn on **Start Snappie with Plasma** in Settings → Hotkeys if you like.
+Keep the environment where it is; the desktop entries point to it. To upgrade,
+install the new wheel with the same command. To check the download, save
+`SHA256SUMS` next to it and run `sha256sum --ignore-missing -c SHA256SUMS`.
 
-```sh
-.venv/bin/python -m pip install --no-deps /path/to/snappie-0.1.0-py3-none-linux_x86_64.whl
-```
-
-Use a wheel built for your CPU architecture and a compatible Linux system; the
-helper links to the system's Wayland client library and libc. KDE Plasma,
-GStreamer plugins, ffmpeg and optional Tesseract remain system dependencies.
-This package does not bundle Python or those tools.
-
-To register the launcher and global shortcut actions for this installation:
-
-```sh
-.venv/bin/python -c 'from snappie import hotkeys; hotkeys.install()'
-```
-
-Start `.venv/bin/snappie` and turn on **Start Snappie with Plasma** in Settings → Hotkeys if desired.
-Keep the virtual environment at its installed path; the desktop entries point to it.
-You can remove the source checkout after installation if the virtual environment
-is stored elsewhere. `install.sh` remains the checkout-based alternative.
-
-For development, use `pip install --no-deps -e .` in that environment. The optional
-`input` extra installs evdev for click/key visualization; `dev` provides pytest and
-the build frontend. To produce a wheel and source archive, install `build` and run
-`python -m build` with gcc, pkg-config, wayland-scanner and Wayland headers available.
-Builds do not register desktop entries or write to your user data directory.
+To install from a checkout instead, use `.` in place of the wheel file. That
+builds the capture helper, so it needs gcc, pkg-config, wayland-scanner and the
+Wayland headers. For development, use `pip install --no-deps -e .`. The `input`
+extra installs evdev for showing clicks and keys; `dev` adds pytest and `build`.
+`python -m build` makes a wheel and a source archive. Builds don't register
+desktop entries or write to your user data directory.
 
 ## Tray and shortcuts
 

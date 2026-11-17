@@ -1,0 +1,140 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/tests.yml
+      - .github/scripts/**
+      - pyproject.toml
+      - build_support.py
+      - MANIFEST.in
+      # What the 22.04 and ARM64 builds and the installed-wheel check exercise.
+      - snappie/helper/**
+      - snappie/capture_helper.py
+      - snappie/icons/**
+      - snappie/purpose/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python -m pip install packaging
+      - id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: python .github/scripts/release-version.py
+
+  tests:
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/tests.yml
+    with:
+      skip_package: true
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwayland-dev libwayland-bin pkg-config
+          python -m pip install build wheel
+      - name: Build wheel from source archive
+        run: |
+          export XDG_DATA_HOME="$RUNNER_TEMP/snappie-build-data"
+          mkdir -p "$XDG_DATA_HOME"
+          python -m build
+          test -z "$(find "$XDG_DATA_HOME" -mindepth 1 -print -quit)"
+      # The helper needs the build system's glibc or newer; this tag lets pip refuse the
+      # wheel on older systems instead of the helper failing to load at capture time.
+      - name: Tag wheel with the minimum glibc
+        id: platform
+        run: |
+          glibc=$(python -c 'import platform; print(platform.libc_ver()[1].replace(".", "_"))')
+          tag="manylinux_${glibc}_${{ matrix.arch }}"
+          python -m wheel tags --remove --platform-tag "$tag" dist/*.whl
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Install into a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/snappie-smoke"
+          "$RUNNER_TEMP/snappie-smoke/bin/python" -m pip install --no-deps dist/*.whl
+      - name: Check installed wheel outside the checkout
+        working-directory: ${{ runner.temp }}
+        env:
+          EXPECTED_VERSION: ${{ needs.version.outputs.version }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_PLATFORM: ${{ steps.platform.outputs.tag }}
+        run: |
+          "$RUNNER_TEMP/snappie-smoke/bin/snappie" --help
+          "$RUNNER_TEMP/snappie-smoke/bin/python" "$GITHUB_WORKSPACE/.github/scripts/check-wheel.py" \
+            "$GITHUB_WORKSPACE"/dist/*.whl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.arch }}
+          path: dist/*.whl
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-artifact@v7
+        if: matrix.arch == 'x86_64'
+        with:
+          name: source
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [version, tests, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: source
+          path: dist
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum *.whl *.tar.gz > SHA256SUMS
+      - name: Publish completed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: bash .github/scripts/publish-release.sh
