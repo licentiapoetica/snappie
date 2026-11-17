@@ -14,11 +14,12 @@ from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QGuiApplication, QIcon, QImage, QPainter
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import a11y, cast, cli, settings
+from . import a11y, cast, cli, settings, style
 from .app_util import Notifier, copy_image, copy_text, log, save_image
 
 ICON = "snappie"
 CLIPBOARD_LINGER = 3600   # one-shot: serve a copied image for at most this long
+DIM_EFFECT = "dialogparent"  # KWin greys out the window under a modal dialog
 
 
 def _icon(*names):
@@ -46,6 +47,7 @@ class App(QObject):
         self.tray = None
         self.exit_code = 0
         self._inspector = None
+        self._undimmed = False
         self._clip_until = 0
         self._last_bgs = {}
         kwin.on_stop = self.stop_recording
@@ -367,11 +369,32 @@ class App(QObject):
             self._inspector = a11y.Inspector(os.getpid(), self.bus)
         return self._inspector
 
+    def _undim(self):
+        """Before grabbing the screens: if one of our modal dialogs is open (uploader editor, message
+        box), KWin shows the window under it greyed out, and screenshots of our windows would be grey
+        too. Unload that effect until _redim()."""
+        if not self._undimmed and style.modal_dialog_open():
+            self._undimmed = self.kwin.suspend_effect(DIM_EFFECT)
+
+    def _redim(self):
+        if self._undimmed:
+            self._undimmed = False
+            self.kwin.resume_effect(DIM_EFFECT)
+
     def pick(self, mode, on_pick, frozen=True, show_cursor=None):
         """Show the picker. frozen: grab the screens first and show them still (screenshots)."""
-        from .picker import Overlay, Picker
         if self.picker:
             return
+        if frozen:
+            self._undim()  # for the whole pick: windows are also grabbed while picking and after it
+        try:
+            self._pick(mode, on_pick, frozen, show_cursor)
+        except Exception:
+            self._redim()
+            raise
+
+    def _pick(self, mode, on_pick, frozen, show_cursor):
+        from .picker import Overlay, Picker
         self.kwin.skip_taskbar(Overlay.TITLE)  # else Plasma's fullscreen Do Not Disturb kicks in
         windows = self.kwin.list_windows()
         bgs = {}
@@ -410,6 +433,7 @@ class App(QObject):
             except Exception as e:
                 log("error:", e)
                 self.notifier.notify("Snappie", str(e), icon="dialog-error")
+        self._redim()
         self.idle_check()
 
     def _bring_front(self, front, mode):
@@ -494,6 +518,7 @@ class App(QObject):
                 self.pick(mode="shot", on_pick=lambda sel: self._shot_picked(sel, opts))
                 return
             pointer = cast.POINTER_EMBEDDED if settings.get("shot.cursor") else cast.POINTER_HIDDEN
+            self._undim()
             self._last_bgs = cast.grab_screens(QGuiApplication.screens(), pointer)
             if screen:
                 pos = self.kwin.cursor_pos()
@@ -512,6 +537,8 @@ class App(QObject):
         except Exception as e:
             log("error:", e)
             self.notifier.notify("Screenshot failed", str(e), icon="dialog-error")
+        if not self.picker:
+            self._redim()
         self.idle_check()
 
     def _screen_of(self, rect):

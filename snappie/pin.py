@@ -25,7 +25,7 @@ class PinWindow(QWidget):
 
     def __init__(self, image, kwin, pos=None):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        style.never_blocked(self)
+        style.mark_overlay(self)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)   # for the opacity setting
         self.caption = f"Snappie — pin {next(_ids)}"

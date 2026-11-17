@@ -1,7 +1,6 @@
 """Shared look: black square panels, Breeze blue accent, white text.
 
 Overlays (picker, in-place editor, recording bar) paint these by hand.
-Overlays also stay usable while a modal dialog is open (never_blocked).
 Normal windows (editor, history, settings) use the Plasma theme and only take
 the accent from here.
 """
@@ -36,8 +35,30 @@ QToolTip { background: #000000; color: #eff0f1; border: 1px solid #3daee9; }
 """
 
 
-def never_blocked(widget):
-    """Keep an overlay usable while one of our modal dialogs (uploader editor, message box) is open.
-    Qt blocks input to all other windows of the process then, so e.g. the picker took no clicks and
-    no Esc. A window-modal window without a parent isn't blocked by earlier modals and blocks nothing."""
+def mark_overlay(widget):
+    """A capture overlay (picker, in-place editor, recording bar, pins, ...), unlike our normal windows:
+    - it stays usable while one of our modal dialogs (uploader editor, message box) is open. Qt blocks
+      input to all other windows of the process then, so the picker took no clicks and no Esc. A
+      window-modal window without a parent isn't blocked by earlier modals and blocks nothing.
+    - the picker doesn't offer it as a window to capture (overlay_titles)."""
     widget.setWindowModality(Qt.WindowModality.WindowModal)
+    widget.setProperty(_OVERLAY, True)
+
+
+def is_overlay(widget):
+    return bool(widget.property(_OVERLAY))
+
+
+def overlay_titles():
+    """Titles of our overlay windows that exist now."""
+    from PyQt6.QtWidgets import QApplication
+    return {w.windowTitle() for w in QApplication.topLevelWidgets() if is_overlay(w)}
+
+
+def modal_dialog_open():
+    """Is one of our modal dialogs showing? (Overlays are window-modal too, but block nothing.)"""
+    from PyQt6.QtWidgets import QApplication
+    return any(w.isVisible() and w.isModal() and not is_overlay(w) for w in QApplication.topLevelWidgets())
+
+
+_OVERLAY = "snappie_overlay"

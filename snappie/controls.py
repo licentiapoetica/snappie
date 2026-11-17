@@ -4,7 +4,7 @@ from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import QButtonGroup, QColorDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
-from .style import ACCENT_TEXT, MUTED, PALETTE, RECORD, TEXT, never_blocked
+from .style import ACCENT_TEXT, MUTED, PALETTE, RECORD, TEXT, mark_overlay
 
 TITLE = "Snappie — recording"
 
@@ -231,7 +231,7 @@ class Controls(QWidget):
 
     def __init__(self, can_pause=True, can_draw=True):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        never_blocked(self)
+        mark_overlay(self)
         self.setWindowTitle(TITLE)
         self.dot = _Dot()
         self.time = QLabel("00:00")

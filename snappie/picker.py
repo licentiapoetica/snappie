@@ -12,13 +12,15 @@ picker draws the window from its own stream (correct even when covered) over
 the others, and the app makes the capture match (see App._bring_front).
 """
 
+import re
 import threading
 
 from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QRegion
 from PyQt6.QtWidgets import QWidget
 
-from .style import ACCENT, ACCENT_TEXT, CHIP_BG, CHIP_HOVER, DIM, MUTED, PANEL_BG, TEXT, WARN, never_blocked
+from .style import (ACCENT, ACCENT_TEXT, CHIP_BG, CHIP_HOVER, DIM, MUTED, PANEL_BG, TEXT, WARN, mark_overlay,
+                    overlay_titles)
 
 # what the picker is for: changes the hints, toggles and what a click returns
 MODES = {
@@ -85,6 +87,11 @@ class Selection:
         self.front = None
 
 
+def _base_caption(caption):
+    """KWin tells windows with the same title apart as "Title <2>"."""
+    return re.sub(r"\s*<\d+>\u200e?$", "", caption)
+
+
 class Picker(QObject):
     finished = pyqtSignal(object)  # Selection or None
     _segmented = pyqtSignal(str, object)
@@ -101,10 +108,13 @@ class Picker(QObject):
         self.frozen = mode != "record" and bool(self.backgrounds)
         self.magnifier = magnifier or mode == "color"
         self.window_style = window_style
-        # topmost first; panels are in it so the window under a panel isn't picked through it
+        # topmost first; panels are in it so the window under a panel isn't picked through it.
+        # Our own windows (settings, editor, history) can be picked, our overlays can't.
+        overlays = overlay_titles()
         self.stack = [w for w in reversed(windows)
                       if w["visible"] and (w["normal"] or w["dialog"] or w.get("dock"))
-                      and w["pid"] != own_pid and w["cls"] != "xwaylandvideobridge"]
+                      and not (w["pid"] == own_pid and _base_caption(w["caption"]) in overlays)
+                      and w["cls"] != "xwaylandvideobridge"]
         self.windows = [w for w in self.stack if not w.get("dock")]
         self.inspector = inspector
         inspector.begin(windows)
@@ -522,7 +532,7 @@ class Overlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
-        never_blocked(self)
+        mark_overlay(self)
         self.setWindowTitle(self.TITLE)
         self.f_text = QFont(self.font())
         self.f_text.setPointSizeF(self.font().pointSizeF() + 0.5)

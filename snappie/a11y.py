@@ -190,6 +190,8 @@ class Inspector:
 
     def _frame_for(self, win):
         """The AT-SPI frame of a KWin window and its surface origin, or None."""
+        if win["pid"] == self.own_pid:
+            return None  # our own tree is served by this (blocked) GUI thread: the picker uses pixels
         if win["pid"] not in self._matched:
             if not any(w["id"] == win["id"] for w in self._windows):
                 self._windows = self._windows + [win]  # begin() wasn't given this one

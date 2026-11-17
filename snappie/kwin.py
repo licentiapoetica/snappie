@@ -232,6 +232,7 @@ class KWin:
         self._placed = {}          # caption -> plugin name
         self._cursor_plugin = None
         self._skipped = set()      # captions kept off the taskbar (one script for all)
+        self._suspended = set()    # effects unloaded for a capture (suspend_effect)
         kwin = bus.get_object("org.kde.KWin", "/Scripting")
         self._load = kwin.get_dbus_method("loadScript", "org.kde.kwin.Scripting")
         self._unload = kwin.get_dbus_method("unloadScript", "org.kde.kwin.Scripting")
@@ -355,7 +356,32 @@ class KWin:
         self._run_script(_ACTIVATE_JS.replace("%TARGET%", json.dumps(window_id)), "snappie_activate")
         GLib.timeout_add(500, lambda: self._unload("snappie_activate") and False)
 
+    def suspend_effect(self, name):
+        """Unload a KWin effect for now (the user's config is untouched). True if it was loaded;
+        then resume_effect (or cleanup) loads it again."""
+        try:
+            fx = dbus.Interface(self.bus.get_object("org.kde.KWin", "/Effects"), "org.kde.kwin.Effects")
+            if not fx.isEffectLoaded(name):
+                return False
+            fx.unloadEffect(name)
+        except dbus.DBusException:
+            return False
+        self._suspended.add(name)
+        return True
+
+    def resume_effect(self, name):
+        if name not in self._suspended:
+            return
+        self._suspended.discard(name)
+        try:
+            dbus.Interface(self.bus.get_object("org.kde.KWin", "/Effects"),
+                           "org.kde.kwin.Effects").loadEffect(name)
+        except dbus.DBusException:
+            pass
+
     def cleanup(self):
+        for name in list(self._suspended):
+            self.resume_effect(name)
         for caption in list(self._placed):
             self.unplace(caption)
         self.untrack_cursor()
