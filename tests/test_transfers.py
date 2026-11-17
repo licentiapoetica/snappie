@@ -42,6 +42,7 @@ def queue(monkeypatch, tmp_path):
     FakeUploader.started = []
     monkeypatch.setattr(upload, "Uploader", FakeUploader)
     monkeypatch.setattr(transfers, "uploader_label", lambda name: "test")
+    monkeypatch.setattr(transfers, "log", lambda *a: None)     # not into the real log file
     monkeypatch.setattr(transfers.settings, "get", lambda key: False)   # no Plasma job
     files = []
     for name in "abc":

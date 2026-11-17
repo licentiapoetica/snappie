@@ -10,7 +10,7 @@ on Wayland the clipboard data lives in the process that copied it).
 import os
 import time
 
-from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QTimer
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QGuiApplication, QIcon, QImage, QPainter
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -30,8 +30,11 @@ def _icon(*names):
 
 
 class App(QObject):
+    _in_gui = pyqtSignal(object)   # a callable from a worker thread, run on the GUI thread
+
     def __init__(self, bus, kwin, daemon=False):
         super().__init__()
+        self._in_gui.connect(lambda fn: fn(), Qt.ConnectionType.QueuedConnection)
         self.bus, self.kwin, self.daemon = bus, kwin, daemon
         self.qapp = QApplication.instance()
         self.notifier = Notifier(bus)
@@ -88,6 +91,11 @@ class App(QObject):
                     self.recording.toggle_drawing()
             elif c == "color":
                 self.pick(mode="color", on_pick=self._color_picked)
+            elif c == "ocr" and ns.file:
+                img = QImage(ns.file)
+                if img.isNull():
+                    raise RuntimeError(f"can't open {ns.file}")
+                self.ocr(img)
             elif c == "ocr":
                 self.pick(mode="ocr", on_pick=self._ocr_picked)
             elif c == "scroll":
@@ -105,6 +113,8 @@ class App(QObject):
                 self.pin(img)
             elif c == "upload":
                 self.upload([os.path.abspath(f) for f in ns.files], ns.uploader)
+            elif c == "convert":
+                self.convert(os.path.abspath(ns.file), "webp" if ns.webp else "gif")
             elif c == "quit":
                 self.quit()
                 return
@@ -122,7 +132,19 @@ class App(QObject):
             hotkeys.install()
         except OSError as e:
             log("could not install the shortcut entries:", e)
+        self._apply_integration()
         self._show_tray()
+
+    def _apply_integration(self):
+        """Dolphin's right-click menu, on or off as set."""
+        from . import servicemenu
+        try:
+            if settings.get("dolphin_menu"):
+                servicemenu.install()
+            else:
+                servicemenu.uninstall()
+        except OSError as e:
+            log("could not update the Dolphin menu:", e)
 
     def idle_check(self):
         self._idle.start()
@@ -690,7 +712,8 @@ class App(QObject):
                 return
         dlg = SettingsDialog(Hotkeys(self.bus))
         self.keep(dlg)
-        dlg.finished.connect(lambda _: (self.windows.discard(dlg), self._update_tray(), self.idle_check()))
+        dlg.finished.connect(lambda _: (self.windows.discard(dlg), self._update_tray(), self._apply_integration(),
+                                        self.idle_check()))
         dlg.show()
 
     def _open_image_dialog(self):
@@ -826,6 +849,47 @@ class App(QObject):
         job.finished.connect(done)
         job.start(img)
         self._ocrs = getattr(self, "_ocrs", set()) | {job}
+
+    def convert(self, video, fmt):
+        """Video file → animated GIF / WebP next to it, in a thread (ffmpeg takes a while)."""
+        import shutil
+        import threading
+        from . import deps, history
+        from .recorder import to_animation
+        if not shutil.which("ffmpeg"):
+            self.notifier.notify("Converting needs ffmpeg", deps.install_hint(["ffmpeg"]),
+                                 icon="dialog-information")
+            return
+        if not os.path.isfile(video):
+            raise RuntimeError(f"Not a file: {video}")
+        base = os.path.splitext(video)[0]
+        out, n = f"{base}.{fmt}", 1
+        while os.path.exists(out):
+            out, n = f"{base}-{n}.{fmt}", n + 1
+        self.jobs += 1
+        self.busy_note(f"Converting {os.path.basename(video)} to {fmt.upper()}…")
+        result = {}
+
+        def work():
+            try:
+                to_animation(video, out, settings.get("gif.fps"), settings.get("gif.max_width"))
+            except (RuntimeError, OSError) as e:
+                result["error"] = str(e)
+            self._in_gui.emit(done)
+
+        def done():
+            self.jobs -= 1
+            if result.get("error"):
+                self.notifier.notify(f"Converting to {fmt.upper()} failed", result["error"], icon="dialog-error")
+            else:
+                history.add("gif", out)
+                mb = os.path.getsize(out) / 1e6
+                self.notifier.notify(f"{fmt.upper()} saved", f"{os.path.basename(out)} · {mb:.1f} MB", path=out,
+                                     icon="image-gif", actions=[("Open", lambda: _open(out)),
+                                                                ("Show in folder", lambda: _show_in_folder(out)),
+                                                                ("Upload", lambda: self.upload(out))])
+            self.idle_check()
+        threading.Thread(target=work, daemon=True).start()
 
     def _ocr_picked(self, sel):
         self.ocr(self.crop_background(sel.rect))

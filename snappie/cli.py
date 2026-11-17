@@ -5,7 +5,7 @@ import argparse
 import os
 
 COMMANDS = ["tray", "shot", "record", "stop", "pause", "draw", "color", "ocr", "scroll",
-            "history", "settings", "edit", "pin", "upload", "quit", "deps"]
+            "history", "settings", "edit", "pin", "upload", "convert", "quit", "deps"]
 
 
 class ArgError(Exception):
@@ -41,7 +41,8 @@ def build_parser():
     sub.add_parser("pause", help="pause / resume the recording")
     sub.add_parser("draw", help="toggle drawing on the recording")
     sub.add_parser("color", help="pick a color from the screen (copies its hex code)")
-    sub.add_parser("ocr", help="pick an area and copy its text")
+    o = sub.add_parser("ocr", help="pick an area and copy its text (or the text of an image file)")
+    o.add_argument("file", nargs="?")
     sub.add_parser("scroll", help="scrolling capture of a window area")
     sub.add_parser("history", help="show the capture history")
     sub.add_parser("settings", help="open the settings")
@@ -52,6 +53,11 @@ def build_parser():
     p.add_argument("files", nargs="+", metavar="file")
     p.add_argument("-u", "--uploader", help="an imported uploader (its file name) or an .sxcu file "
                                             "(default: the one chosen in settings)")
+    c = sub.add_parser("convert", help="convert a video to an animated GIF / WebP next to it")
+    g = c.add_mutually_exclusive_group(required=True)
+    g.add_argument("--gif", action="store_true")
+    g.add_argument("--webp", action="store_true")
+    c.add_argument("file")
     sub.add_parser("quit", help="quit the tray app")
     sub.add_parser("deps", help="check what Snappie needs from the system")
     return ap
@@ -96,7 +102,7 @@ def absolute_paths(argv):
     """File arguments as absolute paths: a forwarded command runs in the tray app, whose working
     directory is somewhere else.  argv must be normalized and valid."""
     argv = list(argv)
-    if argv and argv[0] in ("edit", "pin", "upload"):
+    if argv and argv[0] in ("edit", "pin", "upload", "ocr", "convert"):
         out, value_of = argv[:1], None
         for a in argv[1:]:
             if value_of:     # an imported uploader is a bare file name; an .sxcu path is a path

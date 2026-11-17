@@ -107,15 +107,21 @@ Every action is also a command, and a global shortcut you can assign in
 | `pause`, `draw`, `stop`     | control the running recording                         |
 | `color`                     | pick a color, copies its hex code                     |
 | `ocr`                       | pick an area, copies its text (needs tesseract)       |
+| `ocr FILE`                  | copies the text of an image file                      |
 | `scroll`                    | scrolling capture of a window area                    |
 | `history`, `settings`       | windows                                               |
 | `edit FILE`, `pin FILE`     | open an image in the editor, pin it to the screen     |
 | `upload FILE…`              | upload files, one after another                       |
 | `upload -u NAME FILE…`      | upload with another uploader (name or `.sxcu` path)   |
+| `convert --gif/--webp FILE` | turn a video into an animated GIF / WebP next to it   |
 | `deps`                      | check what is installed, print the install command    |
 
 When the tray app is running, commands are handed to it instantly. Otherwise
 the command runs on its own and the process exits when done.
+
+**Dolphin:** right-click files → **Snappie** to upload them, annotate or pin
+an image, copy the text in an image, or turn a video into a GIF or WebP. Turn
+this menu off in Settings → Hotkeys.
 
 ## Picking
 

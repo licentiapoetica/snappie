@@ -28,3 +28,13 @@ def test_absolute_paths_keep_uploader_names(tmp_path, monkeypatch):
     assert cli.absolute_paths(["upload", "a.png", "--uploader=./my.sxcu"]) == \
         ["upload", a, "--uploader=" + str(tmp_path / "my.sxcu")]
     assert cli.parse(["upload", "-u", "c.sxcu", "a", "b"]).uploader == "c.sxcu"
+
+
+def test_ocr_file_and_convert():
+    assert cli.parse(["ocr"]).file is None
+    assert cli.parse(["ocr", "a.png"]).file == "a.png"
+    ns = cli.parse(["convert", "--webp", "v.mp4"])
+    assert ns.webp and not ns.gif and ns.file == "v.mp4"
+    import pytest
+    with pytest.raises(cli.ArgError):
+        cli.parse(["convert", "v.mp4"])          # --gif or --webp is required

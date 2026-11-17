@@ -423,6 +423,10 @@ class SettingsDialog(QDialog):
     def _hotkeys(self):
         page = QWidget()
         v = QVBoxLayout(page)
+        box, form = _form("File manager")
+        form.addRow(self._bind("dolphin_menu", QCheckBox(
+            "Snappie in Dolphin's right-click menu (upload, annotate, pin, OCR, convert to GIF)")))
+        v.addWidget(box)
         if self.hotkeys is None:
             v.addWidget(_hint("Global shortcuts belong to the running snappie tray app. Start it and "
                               "open Settings from its menu to see them here, or set them in System Settings "

@@ -54,6 +54,7 @@ DEFAULTS = {
     "gif.fps": 15,
     "gif.max_width": 960,                 # 0 = keep the native width
 
+    "dolphin_menu": True,                 # Snappie submenu in Dolphin's right-click menu
     # -- uploads --
     "upload.uploader": "",                # file name in UPLOADERS_DIR, "" = none chosen
     "upload.copy_url": True,              # copy the URL after uploading
