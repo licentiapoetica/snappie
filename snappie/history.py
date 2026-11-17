@@ -603,9 +603,9 @@ class HistoryWindow(QMainWindow):
         m.exec(self.view.viewport().mapToGlobal(pos))
 
     def _activate(self):
-        """Screenshots open in our editor; videos and GIFs in their default app."""
+        """Screenshots open in our editor, videos in the video editor; GIFs in their default app."""
         e = self.current()
-        if e and e.get("kind") == "image" and os.path.exists(e["path"]):
+        if e and e.get("kind") in ("image", "video") and os.path.exists(e["path"]):
             self._do("edit")
         else:
             self._do("open")

@@ -2,7 +2,7 @@
 
 Standard library only at import time: `snappie deps`, install.sh and the start-up
 check run this when the rest of the app can't be imported.  Package names are
-known for Arch and openSUSE (and their derivatives); elsewhere the report names
+known for Arch, openSUSE and Debian/Ubuntu (and their derivatives); elsewhere the report names
 the missing pieces.
 """
 
@@ -13,7 +13,8 @@ import shutil
 import subprocess
 import sys
 
-INSTALL = {"arch": "sudo pacman -S --needed", "suse": "sudo zypper install"}
+INSTALL = {"arch": "sudo pacman -S --needed", "suse": "sudo zypper install",
+           "debian": "sudo apt install"}
 
 
 class Dep:
@@ -27,53 +28,60 @@ class Dep:
         self.packages, self.feature = packages, feature
 
 
-def _p(arch, suse):
-    return {"arch": arch.split(), "suse": suse.split()}
+def _p(arch, suse, debian):
+    return {"arch": arch.split(), "suse": suse.split(), "debian": debian.split()}
 
 
 DEPS = [
-    Dep("pyqt6", "PyQt6", "python", ["PyQt6.QtWidgets", "PyQt6.QtDBus"], _p("python-pyqt6", "python3-PyQt6")),
-    Dep("qtsvg", "Qt SVG", "python", ["PyQt6.QtSvg"], _p("qt6-svg", "python3-PyQt6")),
-    Dep("dbus", "dbus-python", "python", ["dbus", "dbus.mainloop.glib"], _p("python-dbus", "python3-dbus-python")),
-    Dep("gobject", "PyGObject", "python", ["gi"], _p("python-gobject", "python3-gobject")),
-    Dep("numpy", "NumPy", "python", ["numpy"], _p("python-numpy", "python3-numpy")),
-    Dep("requests", "Requests", "python", ["requests"], _p("python-requests", "python3-requests")),
-    Dep("gst", "GStreamer", "typelib", [("Gst", "1.0")], _p("gstreamer", "gstreamer typelib-1_0-Gst-1_0")),
+    Dep("pyqt6", "PyQt6", "python", ["PyQt6.QtWidgets", "PyQt6.QtDBus"],
+        _p("python-pyqt6", "python3-PyQt6", "python3-pyqt6")),
+    Dep("qtsvg", "Qt SVG", "python", ["PyQt6.QtSvg"], _p("qt6-svg", "python3-PyQt6", "python3-pyqt6.qtsvg")),
+    Dep("dbus", "dbus-python", "python", ["dbus", "dbus.mainloop.glib"],
+        _p("python-dbus", "python3-dbus-python", "python3-dbus")),
+    Dep("gobject", "PyGObject", "python", ["gi"], _p("python-gobject", "python3-gobject", "python3-gi")),
+    Dep("numpy", "NumPy", "python", ["numpy"], _p("python-numpy", "python3-numpy", "python3-numpy")),
+    Dep("requests", "Requests", "python", ["requests"],
+        _p("python-requests", "python3-requests", "python3-requests")),
+    Dep("gst", "GStreamer", "typelib", [("Gst", "1.0")],
+        _p("gstreamer", "gstreamer typelib-1_0-Gst-1_0", "gir1.2-gstreamer-1.0")),
     Dep("gdkpixbuf", "GdkPixbuf", "typelib", [("GdkPixbuf", "2.0")],
-        _p("gdk-pixbuf2", "typelib-1_0-GdkPixbuf-2_0")),
-    Dep("atspi", "AT-SPI", "typelib", [("Atspi", "2.0")], _p("at-spi2-core", "typelib-1_0-Atspi-2_0")),
+        _p("gdk-pixbuf2", "typelib-1_0-GdkPixbuf-2_0", "gir1.2-gdkpixbuf-2.0")),
+    Dep("atspi", "AT-SPI", "typelib", [("Atspi", "2.0")],
+        _p("at-spi2-core", "typelib-1_0-Atspi-2_0", "gir1.2-atspi-2.0")),
     Dep("pipewire", "GStreamer PipeWire plugin", "gst", ["pipewiresrc"],
-        _p("gst-plugin-pipewire", "gstreamer-plugin-pipewire")),
+        _p("gst-plugin-pipewire", "gstreamer-plugin-pipewire", "gstreamer1.0-pipewire")),
     Dep("gst-base", "GStreamer base plugins", "gst",
         ["videoconvert", "videorate", "appsink", "audioconvert", "audioresample", "audiomixer", "opusenc"],
-        _p("gst-plugins-base-libs gst-plugins-base", "gstreamer-plugins-base")),
+        _p("gst-plugins-base-libs gst-plugins-base", "gstreamer-plugins-base", "gstreamer1.0-plugins-base")),
     Dep("gst-good", "GStreamer good plugins", "gst",
         ["videocrop", "gdkpixbufoverlay", "capssetter", "matroskamux", "pulsesrc"],
-        _p("gst-plugins-good", "gstreamer-plugins-good")),
+        _p("gst-plugins-good", "gstreamer-plugins-good", "gstreamer1.0-plugins-good")),
     Dep("encoder", "a GStreamer video encoder (VA-API)", "gst-any",
-        ["vah265enc", "vah264enc", "vaav1enc", "svtav1enc"], _p("gst-plugin-va", "gstreamer-plugins-bad")),
+        ["vah265enc", "vah264enc", "vaav1enc", "svtav1enc"],
+        _p("gst-plugin-va", "gstreamer-plugins-bad", "gstreamer1.0-plugins-bad")),
     Dep("parsers", "GStreamer video parsers", "gst", ["h265parse", "h264parse", "av1parse"],
-        _p("gst-plugins-bad-libs", "gstreamer-plugins-bad")),
-    Dep("ffmpeg", "ffmpeg", "cmd", ["ffmpeg"], _p("ffmpeg", "ffmpeg")),
+        _p("gst-plugins-bad-libs", "gstreamer-plugins-bad", "gstreamer1.0-plugins-bad")),
+    Dep("ffmpeg", "ffmpeg", "cmd", ["ffmpeg"], _p("ffmpeg", "ffmpeg", "ffmpeg")),
     Dep("wayland-runtime", "Wayland client library", "library", ["wayland-client"],
-        _p("wayland", "libwayland-client0")),
+        _p("wayland", "libwayland-client0", "libwayland-client0")),
     # building the capture helper (snappie/helper/build.sh)
-    Dep("compiler", "a C compiler", "cmd", ["cc"], _p("gcc", "gcc")),
-    Dep("pkg-config", "pkg-config", "cmd", ["pkg-config"], _p("pkgconf", "pkgconf-pkg-config")),
+    Dep("compiler", "a C compiler", "cmd", ["cc"], _p("gcc", "gcc", "gcc")),
+    Dep("pkg-config", "pkg-config", "cmd", ["pkg-config"], _p("pkgconf", "pkgconf-pkg-config", "pkg-config")),
     Dep("wayland", "Wayland client headers", "pkgconfig", ["wayland-client", "wayland-scanner"],
-        _p("wayland", "wayland-devel")),
+        _p("wayland", "wayland-devel", "libwayland-dev libwayland-bin")),
     # optional
-    Dep("tesseract", "tesseract", "cmd", ["tesseract"], _p("tesseract", "tesseract-ocr"),
+    Dep("tesseract", "tesseract", "cmd", ["tesseract"], _p("tesseract", "tesseract-ocr", "tesseract-ocr"),
         feature="text recognition (OCR)"),
-    Dep("evdev", "python-evdev", "python", ["evdev"], _p("python-evdev", "python3-evdev"),
+    Dep("evdev", "python-evdev", "python", ["evdev"], _p("python-evdev", "python3-evdev", "python3-evdev"),
         feature="showing clicks and keys in recordings"),
-    Dep("openssh", "OpenSSH client", "cmd", ["ssh", "sftp"], _p("openssh", "openssh-clients"),
-        feature="SFTP uploads"),
+    Dep("openssh", "OpenSSH client", "cmd", ["ssh", "sftp"],
+        _p("openssh", "openssh-clients", "openssh-client"), feature="SFTP uploads"),
     # building the Share menu plugin (snappie/purpose/, share_plugin.py)
-    Dep("cmake", "CMake", "cmd", ["cmake"], _p("cmake", "cmake"), feature="the Share menu entry"),
-    Dep("c++", "a C++ compiler", "cmd", ["c++"], _p("gcc", "gcc-c++"), feature="the Share menu entry"),
+    Dep("cmake", "CMake", "cmd", ["cmake"], _p("cmake", "cmake", "cmake"), feature="the Share menu entry"),
+    Dep("c++", "a C++ compiler", "cmd", ["c++"], _p("gcc", "gcc-c++", "g++"), feature="the Share menu entry"),
     Dep("purpose-dev", "KF6 Purpose and Qt 6 headers", "cmake", ["KF6Purpose", "KF6CoreAddons", "Qt6DBus"],
-        _p("purpose kcoreaddons qt6-base", "kf6-purpose-devel kf6-kcoreaddons-devel qt6-dbus-devel"),
+        _p("purpose kcoreaddons qt6-base", "kf6-purpose-devel kf6-kcoreaddons-devel qt6-dbus-devel",
+           "libkf6purpose-dev libkf6coreaddons-dev qt6-base-dev"),
         feature="the Share menu entry"),
 ]
 SHARE_PLUGIN_DEPS = ("cmake", "c++", "purpose-dev")
@@ -88,10 +96,11 @@ _SUSE_LANGS = {
 }
 
 
-def family():
-    """"arch", "suse" or None, from /etc/os-release (derivatives list their parent in ID_LIKE)."""
+def family(os_release="/etc/os-release"):
+    """"arch", "suse", "debian" or None, from os-release (derivatives list their parent in ID_LIKE;
+    Ubuntu and its flavours and KDE neon count as Debian)."""
     try:
-        with open("/etc/os-release") as f:
+        with open(os_release) as f:
             info = dict(line.rstrip("\n").split("=", 1) for line in f if "=" in line)
     except OSError:
         return None
@@ -100,6 +109,8 @@ def family():
         return "arch"
     if any(i.startswith(("suse", "opensuse")) for i in ids):
         return "suse"
+    if "debian" in ids or "ubuntu" in ids:
+        return "debian"
     return None
 
 
@@ -195,6 +206,8 @@ def _tesseract_data(lang, fam):
         return [f"tesseract-data-{c}" for c in codes]
     if fam == "suse":
         return [f"tesseract-ocr-traineddata-{_SUSE_LANGS.get(c, c)}" for c in codes]
+    if fam == "debian":
+        return [f"tesseract-ocr-{c.replace('_', '-')}" for c in codes]
     return []
 
 
@@ -250,7 +263,7 @@ def report():
             lang = None
         lines += ["", "Install with:", "  " + install_hint(gone, lang)]
         if family() is None:
-            lines.append("  (package names are only known for Arch and openSUSE)")
+            lines.append("  (package names are only known for Arch, openSUSE and Debian/Ubuntu)")
     else:
         lines.append("Everything Snappie needs is installed.")
     return "\n".join(lines), not required

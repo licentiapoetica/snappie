@@ -52,6 +52,17 @@ sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evde
 sudo zypper install cmake gcc-c++ kf6-purpose-devel kf6-kcoreaddons-devel qt6-dbus-devel   # optional: Share menu
 ```
 
+On Debian 13 and newer, Kubuntu 25.04 and newer, KDE neon and their derivatives:
+
+```sh
+sudo apt install python3-pyqt6 python3-pyqt6.qtsvg python3-dbus python3-gi python3-numpy \
+    python3-requests gir1.2-gstreamer-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad ffmpeg libwayland-client0
+sudo apt install gcc pkg-config libwayland-dev libwayland-bin   # source installs
+sudo apt install tesseract-ocr tesseract-ocr-eng python3-evdev   # optional
+sudo apt install cmake g++ libkf6purpose-dev libkf6coreaddons-dev qt6-base-dev   # optional: Share menu
+```
+
 ## Python package installation
 
 Snappie can also be installed as a Python package, without `install.sh` or a checkout.
@@ -325,8 +336,8 @@ plugin (`qt6-imageformats`) reads it instead.
 
 ## Cutting and cropping videos
 
-`snappie edit video.mp4`, Dolphin's **Cut and Crop**, or **Cut and Crop** in
-the history opens the video editor:
+`snappie edit video.mp4`, Dolphin's **Cut and Crop**, or double-clicking a
+video in the history opens the video editor:
 
 - **Split** (S) cuts the timeline at the playhead. Double-click a part, or
   select it and press Delete, to remove it. Do the same again to bring it back.
