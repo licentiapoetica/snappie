@@ -177,9 +177,9 @@ or delete. Opening a screenshot there opens it in Snappie's editor. That include
 **Uploads** use ShareX custom uploaders: import any `.sxcu` file (Zipline,
 XBackBone, catbox, …) in Settings → Uploads. The link is copied when done.
 Several files upload one after another; when they're done, all the links are
-copied. While uploading, the tray icon shows the percentage, and Plasma shows it
-in its notifications with speed, time left and a Cancel button. You can also
-cancel from the tray menu.
+copied. While uploading, the tray icon shows the percentage; cancel from the
+tray menu. Settings → Uploads can also show it in Plasma's notifications, with
+speed, time left and a Cancel button.
 
 **Sounds** for a screenshot, the start and end of a recording, a finished
 upload, or an error can be turned on in Settings → Sounds. They come from your
