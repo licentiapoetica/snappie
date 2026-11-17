@@ -115,10 +115,19 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [version, tests, build]
     runs-on: ubuntu-22.04
+    # The Latest lookup and update must not overlap across different release tags.
+    concurrency:
+      group: release-publish
+      queue: max
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python -m pip install packaging
       - uses: actions/download-artifact@v8
         with:
           pattern: wheel-*

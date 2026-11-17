@@ -67,7 +67,8 @@ if action in ("create", "upload") and os.environ.get("FAKE_UPLOAD_FAIL"):
     log = tmp_path / "calls"
 
     def run(state="missing", latest="missing", tag="v0.1.0", prerelease=False, fail_upload=False):
-        env = dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}", GH_CALLS=str(log),
+        path = f"{binaries}:{Path(sys.executable).parent}:{os.environ['PATH']}"
+        env = dict(os.environ, PATH=path, GH_CALLS=str(log),
                    FAKE_GH_STATE=state, FAKE_GH_LATEST=latest, RELEASE_TAG=tag,
                    RELEASE_PRERELEASE=str(prerelease).lower())
         if fail_upload:
@@ -106,6 +107,11 @@ def test_draft_upload_can_be_retried_without_marking_prerelease_latest(publisher
     ("v0.9.0", "v0.10.0", True),
     ("v0.3.0", "v0.2.1", False),  # a patch for an older series
     ("v0.2.0", "v0.2.0.post1", True),
+    ("v0.2.0.post1", "v0.2.0+fix1", False),
+    ("v0.2.0+fix1", "v0.2.0.post1", True),
+    ("v2.0.0", "v1!0.1", True),
+    ("v1!0.1", "v2.0.0", False),
+    ("v1.0.0.post1", "v1.0.0.0", False),
 ])
 def test_only_the_highest_version_becomes_latest(publisher, latest, tag, is_latest):
     result, calls = publisher(latest=latest, tag=tag)
@@ -129,6 +135,12 @@ def test_lookup_errors_are_not_mistaken_for_a_missing_release(publisher):
 
 def test_latest_lookup_error_leaves_the_draft(publisher):
     result, calls = publisher(latest="error")
+    assert result.returncode != 0
+    assert "edit" not in actions(calls)
+
+
+def test_invalid_latest_version_leaves_the_draft(publisher):
+    result, calls = publisher(latest="not-a-version")
     assert result.returncode != 0
     assert "edit" not in actions(calls)
 

@@ -18,6 +18,9 @@ git push origin v0.1.0
 The workflow attaches both wheels, one source archive and `SHA256SUMS`, with
 generated release notes. Incomplete uploads stay in a draft that a rerun can
 resume. Published assets are not overwritten; corrections need a new version.
+Builds for different tags can run in parallel. Publish jobs queue across tags so
+the Latest lookup and update run one at a time. Version comparisons use Python's
+PEP 440 ordering, including local versions, postreleases and epochs.
 
 To test the process before tagging, run **Actions → release → Run workflow**.
 Manual runs build and test the packages and provide downloadable workflow
