@@ -475,9 +475,13 @@ class SettingsDialog(QDialog):
     def _hotkeys(self):
         page = QWidget()
         v = QVBoxLayout(page)
-        box, form = _form("File manager")
+        from . import share_plugin
+        box, form = _form("KDE integration")
         form.addRow(self._bind("dolphin_menu", QCheckBox(
             "Snappie in Dolphin's right-click menu (upload, annotate, pin, OCR, convert to GIF)")))
+        form.addRow(self._bind("share_menu", QCheckBox(
+            "“Upload with Snappie” in the Share menus of Spectacle, Gwenview, Okular, Dolphin…")))
+        form.addRow(_hint(share_plugin.describe(share_plugin.status())))
         v.addWidget(box)
         if self.hotkeys is None:
             v.addWidget(_hint("Global shortcuts belong to the running snappie tray app. Start it and "

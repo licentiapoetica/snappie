@@ -49,6 +49,10 @@ Source builds/checkouts additionally need gcc + pkg-config + wayland-devel + way
 | `snappie/livedraw.py` | drawing/click ripples/key bubbles on recordings; reads `/dev/input` (evdev) |
 | `snappie/scrollcap.py` | scrolling capture; `Stitcher` is plain numpy (testable offline) |
 | `snappie/upload.py` | ShareX `.sxcu` custom uploaders (incl. self-signed cert trust) |
+| `snappie/transfers.py` | upload queue: progress, cancel, tray + Plasma job view (`org.kde.JobViewServer`) |
+| `snappie/servicemenu.py` | Dolphin right-click submenu (KIO service menus) |
+| `snappie/share_plugin.py`, `snappie/purpose/` | KDE Share menu plugin (KF6 Purpose, C++) built on the user's machine; D-Bus activation |
+| `snappie/sound.py` | event sounds through GStreamer playbin, sound theme lookup |
 | `snappie/ocr.py` | tesseract CLI wrapper with layout heuristics |
 | `snappie/history.py` | `history.jsonl` + history window |
 | `snappie/settings.py`, `settings_ui.py` | flat dotted keys with `DEFAULTS`; settings dialog |

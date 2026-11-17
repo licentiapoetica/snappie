@@ -59,6 +59,7 @@ def build_parser():
     g.add_argument("--webp", action="store_true")
     c.add_argument("file")
     sub.add_parser("quit", help="quit the tray app")
+    sub.add_parser("service")   # no help: started by D-Bus activation, see share_plugin
     sub.add_parser("deps", help="check what Snappie needs from the system")
     return ap
 

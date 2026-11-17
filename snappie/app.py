@@ -50,6 +50,8 @@ class App(QObject):
         self._last_bgs = {}
         kwin.on_stop = self.stop_recording
         kwin.on_command = self.command
+        kwin.on_upload = lambda paths, done: self.upload(paths, on_done=done)
+        self._upload_waiters = []  # [(jobs, done(urls, error))] for D-Bus callers
         QApplication.clipboard().dataChanged.connect(self._clipboard_changed)
         self._idle = QTimer(self, singleShot=True, interval=500, timeout=self._maybe_quit)
         if daemon:
@@ -118,6 +120,10 @@ class App(QObject):
             elif c == "quit":
                 self.quit()
                 return
+            elif c == "service":
+                # started by D-Bus activation: the call that started us arrives right away
+                self._idle.start(5000)
+                return
         except Exception as e:
             from . import sound
             log("error:", e)
@@ -138,8 +144,10 @@ class App(QObject):
         self._show_tray()
 
     def _apply_integration(self):
-        """Dolphin's right-click menu, on or off as set."""
-        from . import servicemenu
+        """Dolphin's right-click menu and the Share menu plugin, on or off as set."""
+        import threading
+        from . import servicemenu, share_plugin
+        from .hotkeys import launcher
         try:
             if settings.get("dolphin_menu"):
                 servicemenu.install()
@@ -147,19 +155,43 @@ class App(QObject):
                 servicemenu.uninstall()
         except OSError as e:
             log("could not update the Dolphin menu:", e)
+        if not settings.get("share_menu"):
+            try:
+                share_plugin.remove()
+            except OSError as e:
+                log("could not remove the Share menu plugin:", e)
+            return
+        if getattr(self, "_building_share_plugin", False):
+            return
+        self._building_share_plugin = True
+
+        def work():   # CMake takes a few seconds: not on the GUI thread
+            try:
+                status = share_plugin.ensure(launcher())
+            except OSError as e:
+                status = f"failed: {e}"
+            self._in_gui.emit(lambda: done(status))
+
+        def done(status):
+            self._building_share_plugin = False
+            if status not in ("system", "ready"):
+                log("Share menu:", share_plugin.describe(status))
+            self.idle_check()
+        threading.Thread(target=work, daemon=True).start()
 
     def idle_check(self):
         self._idle.start()
 
     def _busy(self):
         return bool(self.picker or self.recording or self.windows or self.jobs or self.uploading
-                    or self._clip_until > time.monotonic())
+                    or getattr(self, "_building_share_plugin", False) or self._clip_until > time.monotonic())
 
     def _maybe_quit(self):
         if self.daemon:
             return
         if self._busy():
-            if not (self.picker or self.recording or self.windows or self.jobs or self.uploading):
+            if not (self.picker or self.recording or self.windows or self.jobs or self.uploading
+                    or getattr(self, "_building_share_plugin", False)):
                 self._idle.start(10_000)  # only the clipboard keeps us: check now and then
             return
         from . import sound
@@ -748,21 +780,41 @@ class App(QObject):
             q.batch_done.connect(self._uploads_done)
         return self._upload_queue
 
-    def upload(self, paths, uploader=None):
-        """Queue files for upload (a path or a list of paths)."""
+    def upload(self, paths, uploader=None, on_done=None):
+        """Queue files for upload (a path or a list of paths). on_done(urls, error) runs once
+        these files are done (the D-Bus method answers with it)."""
         from . import upload
         if isinstance(paths, str):
             paths = [paths]
         if not uploader and not settings.get("upload.uploader") and not upload.list_uploaders():
             self.notifier.notify("No uploader set up", "Import a ShareX .sxcu uploader in Settings → Uploads",
                                  icon="dialog-information", actions=[("Settings", self.show_settings)])
+            if on_done:
+                on_done([], "No uploader set up in Snappie")
             return
         missing = [p for p in paths if not os.path.isfile(p)]
         if missing:
             self.notifier.notify("Can't upload", "Not a file: " + ", ".join(missing), icon="dialog-error")
         paths = [p for p in paths if os.path.isfile(p)]
-        if paths:
-            self.uploads.add(paths, uploader)
+        if not paths:
+            if on_done:
+                on_done([], "Not a file: " + ", ".join(missing))
+            return
+        jobs = self.uploads.add(paths, uploader)
+        if on_done:
+            self._upload_waiters.append((jobs, on_done))
+
+    def _answer_waiters(self):
+        for w in list(self._upload_waiters):
+            jobs, done = w
+            if all(j.finished for j in jobs):
+                self._upload_waiters.remove(w)
+                urls = [j.result.url for j in jobs if j.result is not None]
+                errors = [j.error for j in jobs if j.result is None]
+                try:
+                    done(urls, errors[0] if errors else "")
+                except Exception as e:  # noqa: BLE001 - the caller may be gone
+                    log("answering an upload request failed:", e)
 
     def _uploads_active(self, active):
         if active:
@@ -774,6 +826,7 @@ class App(QObject):
     def _upload_done(self, job):
         """One file finished: record it in the history."""
         from . import history
+        self._answer_waiters()
         if job.result is None:
             log(f"upload of {job.path} failed: {job.error}")
             return
@@ -788,6 +841,7 @@ class App(QObject):
 
     def _uploads_done(self, jobs, cancelled):
         from . import sound, upload
+        self._answer_waiters()
         ok = [j for j in jobs if j.result is not None]
         failed = [j for j in jobs if j.result is None and not isinstance(j.exception, upload.Cancelled)]
         if failed:

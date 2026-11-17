@@ -18,8 +18,9 @@ snappie --help        # all commands
 KDE Plasma 6 (Wayland), Python 3 with PyQt6, dbus-python, PyGObject, NumPy and
 Requests, GStreamer with the PipeWire, base, good and VA plugins, ffmpeg, and
 the Wayland client library. Source installs also need gcc + Wayland headers
-to build the capture helper. Optional: tesseract (OCR) and
-python-evdev (clicks and keys in recordings).
+to build the capture helper. Optional: tesseract (OCR),
+python-evdev (clicks and keys in recordings), and CMake, a C++ compiler and the
+KF6 Purpose headers (the Share menu entry).
 
 `snappie deps` checks all of it and prints the install command for your distro;
 `install.sh` runs it first. On Arch and its derivatives:
@@ -30,6 +31,7 @@ sudo pacman -S --needed python-pyqt6 qt6-svg python-dbus python-gobject python-n
     gst-plugin-va gst-plugins-bad-libs ffmpeg wayland
 sudo pacman -S --needed gcc pkgconf   # source installs (including install.sh)
 sudo pacman -S --needed tesseract tesseract-data-eng python-evdev   # optional
+sudo pacman -S --needed cmake purpose   # optional: Share menu entry
 ```
 
 On openSUSE:
@@ -40,6 +42,7 @@ sudo zypper install python3-PyQt6 python3-dbus-python python3-gobject python3-nu
     gstreamer-plugins-good gstreamer-plugins-bad ffmpeg libwayland-client0
 sudo zypper install gcc pkgconf-pkg-config wayland-devel   # source installs
 sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evdev   # optional
+sudo zypper install cmake gcc-c++ kf6-purpose-devel kf6-kcoreaddons-devel qt6-dbus-devel   # optional: Share menu
 ```
 
 ## Python package installation
@@ -122,6 +125,13 @@ the command runs on its own and the process exits when done.
 **Dolphin:** right-click files → **Snappie** to upload them, annotate or pin
 an image, copy the text in an image, or turn a video into a GIF or WebP. Turn
 this menu off in Settings → Hotkeys.
+
+**Share menus:** Spectacle, Gwenview, Okular and Dolphin get **Share → Upload
+with Snappie**. The app shows the link when the upload is done, and Snappie
+starts by itself if it isn't running. The entry is a small plugin that Snappie
+builds on your computer (it needs the packages listed under Requirements), and
+it shows up after you log in again once. Distro packages can build it with
+`snappie/purpose/CMakeLists.txt` instead.
 
 ## Picking
 

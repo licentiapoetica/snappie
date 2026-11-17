@@ -55,6 +55,7 @@ DEFAULTS = {
     "gif.max_width": 960,                 # 0 = keep the native width
 
     "dolphin_menu": True,                 # Snappie submenu in Dolphin's right-click menu
+    "share_menu": True,                   # "Upload with Snappie" in KDE's Share menus (builds a plugin)
     # -- sounds -- (sound.<event>.file: "" = the sound theme's sound; see sound.EVENTS)
     "sound.volume": 70,
     "sound.shot": False, "sound.shot.file": "",

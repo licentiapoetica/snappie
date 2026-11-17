@@ -13,6 +13,7 @@ ln -sf "$here/snappie.sh" "$HOME/.local/bin/snappie"
 "$here/helper/build.sh" >/dev/null   # capture helper (also built automatically on first run)
 PYTHONPATH="$here" python3 -c "from snappie import hotkeys; hotkeys.install('$HOME/.local/bin/snappie')"
 PYTHONPATH="$here" python3 -c "from snappie import servicemenu; servicemenu.install('$HOME/.local/bin/snappie')"
+share=$(PYTHONPATH="$here" python3 -m snappie.share_plugin "$HOME/.local/bin/snappie" 2>&1 || true)
 if [ "$1" != "--no-autostart" ]; then
     PYTHONPATH="$here" python3 -c "from snappie import app; app._set_autostart(True)" 2>/dev/null || true
 fi
@@ -21,3 +22,4 @@ echo "  snappie            start the tray app (also starts with Plasma now)"
 echo "  snappie --help     all commands (shot, record, color, ocr, scroll, …)"
 echo "  Shortcuts: System Settings → Shortcuts → snappie (no keys are set by default)"
 echo "  Dolphin:   right-click a file → Snappie (upload, annotate, pin, OCR, convert)"
+echo "  Share:     $share"

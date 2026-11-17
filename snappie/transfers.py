@@ -35,6 +35,10 @@ class Job:
         self.target = uploader_label(uploader)
         self.result, self.error, self.exception = None, "", None
 
+    @property
+    def finished(self):
+        return self.result is not None or bool(self.error)
+
 
 class UploadQueue(QObject):
     changed = pyqtSignal()                 # progress or state changed
@@ -91,14 +95,14 @@ class UploadQueue(QObject):
     # -- control
 
     def add(self, paths, uploader=None):
+        """Queue files; returns their Jobs."""
         was = self.active
         if not was:
             self.batch, self.cancelled = [], False
             self._samples.clear()
-        for p in paths:
-            job = Job(p, uploader)
-            self.pending.append(job)
-            self.batch.append(job)
+        jobs = [Job(p, uploader) for p in paths]
+        self.pending.extend(jobs)
+        self.batch.extend(jobs)
         if not was:
             self.active_changed.emit(True)
             self._start_plasma_job()
@@ -106,6 +110,7 @@ class UploadQueue(QObject):
         else:
             self._update_plasma()
             self.changed.emit()
+        return jobs
 
     def cancel(self):
         """Cancel the running upload and drop the waiting ones."""
@@ -113,7 +118,7 @@ class UploadQueue(QObject):
             return
         self.cancelled = True
         for job in self.pending:
-            job.error = "cancelled"
+            job.error = "Upload cancelled"
             job.exception = upload.Cancelled()
         self.pending.clear()
         if self._worker:
@@ -189,7 +194,7 @@ class UploadQueue(QObject):
                   "speed": dbus.UInt64(int(self.speed()))}
         if n > 1:
             fields["totalFiles"] = dbus.UInt64(n)
-            fields["processedFiles"] = dbus.UInt64(sum(1 for j in self.batch if j.result or j.error))
+            fields["processedFiles"] = dbus.UInt64(sum(1 for j in self.batch if j.finished))
         cur = self.current
         if cur:
             fields["descriptionLabel1"], fields["descriptionValue1"] = "File", cur.name

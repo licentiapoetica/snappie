@@ -197,6 +197,22 @@ class _Service(dbus.service.Object):
         return self.owner.on_command([str(a) for a in argv]) or ""
 
 
+    @dbus.service.method(IFACE, in_signature="as", out_signature="as", async_callbacks=("reply", "fail"))
+    def upload(self, files, reply, fail):
+        """Upload files and answer with their links once they're done (KDE's Share menu plugin).
+        Fails only when none of them could be uploaded."""
+        if not self.owner.on_upload:
+            fail(dbus.DBusException("Snappie is not ready", name=IFACE + ".Error.Busy"))
+            return
+
+        def done(urls, error):
+            if urls:
+                reply(dbus.Array(urls, signature="s"))
+            else:
+                fail(dbus.DBusException(error or "Upload failed", name=IFACE + ".Error.Failed"))
+        self.owner.on_upload([str(f) for f in files], done)
+
+
 class AlreadyRunning(Exception):
     pass
 
@@ -212,6 +228,7 @@ class KWin:
         self.on_stop = None
         self.on_cursor = None      # (x, y, target frame x, target frame y)
         self.on_command = None     # argv -> reply text
+        self.on_upload = None      # (paths, done(urls, error)) for the `upload` D-Bus method
         self._placed = {}          # caption -> plugin name
         self._cursor_plugin = None
         self._skipped = set()      # captions kept off the taskbar (one script for all)
