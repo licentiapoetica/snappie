@@ -11,7 +11,7 @@ features, commands or settings change.
 ```sh
 ./snappie.sh              # start the tray app from the checkout (same as `snappie` once installed)
 ./snappie.sh shot         # any command; forwarded to the running tray app if there is one
-./install.sh              # symlink into ~/.local/bin, build helper, shortcut entries, autostart
+./install.sh              # symlink into ~/.local/bin if on PATH, else /usr/local/bin (sudo); helper,, shortcut entries, autostart
 ```
 
 `pyproject.toml` defines the installable package and the `snappie` command; SVG icons and
