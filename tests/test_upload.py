@@ -177,3 +177,20 @@ def test_response_kept_on_success_and_on_errors(server, blob):
     with pytest.raises(upload.UploadError) as e:
         upload.upload(str(blob), cfg(server, "Binary", URL="{json:nope}"))
     assert "No URL" in str(e.value) and e.value.response.json()["len"] == blob.stat().st_size
+
+
+def test_post_file_for_plugins(server, blob):
+    seen = []
+    resp = upload.post_file(f"http://127.0.0.1:{server.server_port}/up", str(blob), field="f",
+                            fields={"a": 1}, headers={"X-Key": "k"}, progress=lambda s, t: seen.append(s))
+    assert resp.json()["url"] == "https://example.test/f"
+    headers, body = server.got[0]
+    assert headers["X-Key"] == "k" and headers["User-Agent"] == upload.USER_AGENT
+    p = parts(headers, body)
+    assert p["f"].get_payload(decode=True) == blob.read_bytes() and p["a"].get_payload(decode=True) == b"1"
+    assert seen[-1] == len(body)
+
+
+def test_request_errors_are_readable():
+    with pytest.raises(upload.UploadError, match="Can't connect to 127.0.0.1:9"):
+        upload.request("GET", "http://127.0.0.1:9/")

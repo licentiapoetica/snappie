@@ -10,16 +10,16 @@ import os
 import tempfile
 import time
 
-from PyQt6.QtCore import QProcess, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
+from PyQt6.QtCore import QProcess, QSize, Qt, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices, QFont, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog,
                              QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
                              QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-                             QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSlider, QSpinBox,
+                             QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSlider, QSpinBox,
                              QTableWidget,
                              QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
-from . import ocr, settings, style, upload
+from . import ocr, settings, style, upload, uploaders
 
 SHOT_AFTER = [("copy", "Copy to clipboard"), ("save", "Save to file"), ("upload", "Upload"),
               ("pin", "Pin to screen"), ("ocr", "Recognize text (OCR)"), ("edit", "Open in editor")]
@@ -380,7 +380,7 @@ class SettingsDialog(QDialog):
     def _uploads(self):
         page = QWidget()
         v = QVBoxLayout(page)
-        box = QGroupBox("Custom uploaders (ShareX .sxcu)")
+        box = QGroupBox("Uploaders")
         h = QHBoxLayout(box)
         left = QVBoxLayout()
         self.up_list = QListWidget()
@@ -394,8 +394,13 @@ class SettingsDialog(QDialog):
         h.addLayout(left, 1)
 
         col = QVBoxLayout()
-        b_import = QPushButton(QIcon.fromTheme("document-import"), "Import…")
-        b_import.clicked.connect(self._import)
+        b_add = QPushButton(QIcon.fromTheme("list-add"), "Add")
+        self.add_menu = QMenu(b_add)
+        self.add_menu.setToolTipsVisible(True)
+        self.add_menu.aboutToShow.connect(self._fill_add_menu)
+        b_add.setMenu(self.add_menu)
+        self.b_edit = QPushButton(QIcon.fromTheme("document-edit"), "Edit…")
+        self.b_edit.clicked.connect(self._edit)
         self.b_default = QPushButton(QIcon.fromTheme("starred-symbolic", QIcon.fromTheme("emblem-favorite")),
                                      "Set as Default")
         self.b_default.clicked.connect(self._set_default)
@@ -404,10 +409,10 @@ class SettingsDialog(QDialog):
         self.b_test = QPushButton(QIcon.fromTheme("cloud-upload"), "Test Upload")
         self.b_test.setToolTip("Uploads a small generated image with the selected uploader")
         self.b_test.clicked.connect(self._test_upload)
-        b_certs = QPushButton(QIcon.fromTheme("security-medium"), "Trusted Certificates…")
-        b_certs.setToolTip("Self-signed certificates you allowed for upload servers")
+        b_certs = QPushButton(QIcon.fromTheme("security-medium"), "Trusted Servers…")
+        b_certs.setToolTip("Self-signed certificates and SSH servers you trusted for uploads")
         b_certs.clicked.connect(self._trusted_certs)
-        for b in (b_import, self.b_default, self.b_remove):
+        for b in (b_add, self.b_edit, self.b_default, self.b_remove):
             col.addWidget(b)
         col.addStretch(1)
         col.addWidget(b_certs)
@@ -434,8 +439,10 @@ class SettingsDialog(QDialog):
         form.addRow(self._bind("upload.plasma_progress",
                                QCheckBox("Show progress in Plasma's notifications (with a Cancel button)")))
         v.addWidget(box)
-        v.addWidget(_hint("Hosts like catbox.moe, Zipline, XBackBone and Chevereto offer .sxcu files; "
-                          "you can also export them from ShareX on Windows."))
+        v.addWidget(_hint("Add imports ShareX .sxcu files (catbox.moe, Zipline, XBackBone, Chevereto, … offer "
+                          "them), or sets up an SFTP server or a command (rclone, scp, a script). Plugins for "
+                          "other services go in the plugins folder (see the Add menu)."))
+        self._entries = {}
         self._uploader = None
         self._response = None     # (response, uploader config, file name) of the last test upload
         return page
@@ -618,9 +625,14 @@ class SettingsDialog(QDialog):
         cur = select or (self.up_list.currentItem().data(Qt.ItemDataRole.UserRole)
                          if self.up_list.currentItem() else None)
         self.up_list.clear()
-        for fname, display in upload.list_uploaders():
+        self._entries = {}
+        for e in uploaders.entries():
+            fname, display = e.file, e.name
+            self._entries[fname] = e
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, fname)
+            item.setIcon(QIcon.fromTheme("dialog-warning") if e.error
+                         else QIcon.fromTheme(e.plugin.icon, QIcon.fromTheme("cloud-upload")))
             if fname == self._default_uploader:
                 item.setText(f"{display}  (default)")
                 f = item.font()
@@ -640,21 +652,64 @@ class SettingsDialog(QDialog):
 
     def _uploader_selected(self):
         name = self._selected_uploader()
+        e = self._entries.get(name)
+        self.b_edit.setEnabled(bool(e) and e.editable)
+        self.b_edit.setToolTip("" if not e or e.editable else
+                               "ShareX uploaders are changed in ShareX or a text editor, then imported again")
         self.b_default.setEnabled(bool(name) and name != self._default_uploader)
         self.b_remove.setEnabled(bool(name))
-        self.b_test.setEnabled(bool(name) and self._uploader is None)
-        if not name:
-            self.up_details.setText("No uploaders yet. Import a ShareX custom uploader (.sxcu) file."
-                                    if not self.up_list.count() else "")
+        self.b_test.setEnabled(bool(e) and not e.error and self._uploader is None)
+        if not e:
+            self.up_details.setText("No uploaders yet. Add one: import a ShareX .sxcu file, or set up an "
+                                    "SFTP server or a command." if not self.up_list.count() else "")
             return
-        try:
-            cfg = upload.resolve(name)
-        except upload.UploadError as e:
-            self.up_details.setText(str(e))
+        kind = e.plugin.name if e.plugin else e.plugin_id or "Unknown"
+        why = e.plugin.available() if e.plugin and not e.error else ""
+        lines = [e.summary(), why, f"{kind}  ·  File: {name}"]
+        self.up_details.setText("\n".join(x for x in lines if x))
+
+    def _fill_add_menu(self):
+        m = self.add_menu
+        m.clear()
+        a = m.addAction(QIcon.fromTheme("document-import"), "Import ShareX Uploader (.sxcu)…")
+        a.triggered.connect(self._import)
+        m.addSeparator()
+        for p in uploaders.plugins().values():
+            if not p.editable:
+                continue
+            a = m.addAction(QIcon.fromTheme(p.icon, QIcon.fromTheme("cloud-upload")), p.name + "…")
+            a.setToolTip("\n".join(x for x in (p.description, p.available()) if x))
+            a.triggered.connect(lambda _=False, p=p: self._add(p))
+        for f, err in uploaders.load_errors.items():
+            a = m.addAction(QIcon.fromTheme("dialog-warning"), f"{f} doesn't load")
+            a.setToolTip(err)
+            a.triggered.connect(lambda _=False, f=f, err=err: QMessageBox.warning(
+                self, "Uploader plugin", f"{f} doesn't load:\n{err}\n\nMore in ~/.local/state/snappie/snappie.log"))
+        m.addSeparator()
+        a = m.addAction(QIcon.fromTheme("folder-open"), "Open Plugins Folder")
+        a.setToolTip(_tilde(settings.PLUGINS_DIR))
+        a.triggered.connect(self._open_plugins)
+
+    def _open_plugins(self):
+        os.makedirs(settings.PLUGINS_DIR, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(settings.PLUGINS_DIR))
+
+    def _add(self, plugin):
+        from .uploader_editor import UploaderEditor
+        dlg = UploaderEditor(plugin, parent=self)
+        if dlg.exec() and dlg.file:
+            if not self._default_uploader:
+                self._default_uploader = dlg.file
+            self._refresh_uploaders(select=dlg.file)
+
+    def _edit(self):
+        from .uploader_editor import UploaderEditor
+        e = self._entries.get(self._selected_uploader())
+        if e is None or not e.editable:
             return
-        dest = cfg.get("DestinationType") or "any"
-        self.up_details.setText(f"{cfg['RequestMethod']} {cfg.get('RequestURL', '')}\n"
-                                f"Body: {cfg['Body']}  ·  For: {dest}  ·  File: {name}")
+        dlg = UploaderEditor(e.plugin, e.name, e.config, e.file, parent=self)
+        if dlg.exec():
+            self._refresh_uploaders(select=dlg.file)
 
     def _import(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "Import custom uploader", os.path.expanduser("~"),
@@ -662,7 +717,7 @@ class SettingsDialog(QDialog):
         last = None
         for p in paths:
             try:
-                last = upload.import_sxcu(p)
+                last = uploaders.import_sxcu(p)
             except (upload.UploadError, OSError) as e:
                 QMessageBox.warning(self, "Import uploader", f"Couldn't import {os.path.basename(p)}:\n{e}")
         if last:
@@ -683,7 +738,7 @@ class SettingsDialog(QDialog):
         if QMessageBox.question(self, "Remove uploader", f"Remove “{self.up_list.currentItem().text()}”?") \
                 != QMessageBox.StandardButton.Yes:
             return
-        upload.remove_uploader(name)
+        uploaders.remove(name)
         if self._default_uploader == name:
             self._default_uploader = ""
         self._refresh_uploaders()
@@ -715,12 +770,14 @@ class SettingsDialog(QDialog):
         self._uploader = None
         if response is not None:
             try:
-                self._response = (response, upload.resolve(name), os.path.basename(path))
+                e = uploaders.get(name)
+                cfg = upload.load_config(e.config) if e.plugin_id == "sxcu" else None
+                self._response = (response, cfg, os.path.basename(path))
                 self.b_response.show()
             except upload.UploadError:
                 pass
         self._uploader_selected()
-        if isinstance(error, upload.UntrustedCertificate) and ask_trust(self, error):
+        if isinstance(error, upload.Untrusted) and error.can_trust and ask_trust(self, error):
             self._test_upload()
             return
         if res is None:
@@ -742,36 +799,33 @@ class SettingsDialog(QDialog):
 
 
 def ask_trust(parent, error):
-    """Ask whether to trust a server's self-signed certificate (pins it). True if trusted."""
-    where = error.host if error.port == 443 else f"{error.host}:{error.port}"
-    box = QMessageBox(QMessageBox.Icon.Warning, "Untrusted certificate",
-                      f"<b>{html.escape(where)}</b> uses a certificate that isn't signed by a trusted "
-                      "authority — usually a self-signed certificate on your own server.", parent=parent)
-    box.setInformativeText(
-        "Only trust it if this is your server and the fingerprint is the one it should have. "
-        "Uploads will then accept exactly this certificate for this server (if it ever changes, "
-        "they stop until you trust the new one).<br><br>SHA-256:<br><tt>"
-        + upload.pretty_fingerprint(error.fingerprint) + "</tt>")
-    trust = box.addButton("Trust This Certificate", QMessageBox.ButtonRole.AcceptRole)
+    """Ask whether to trust a server (an upload.Untrusted error: self-signed certificate, unknown
+    SSH host key) and remember it if so. True if trusted."""
+    box = QMessageBox(QMessageBox.Icon.Warning, error.title, error.question, parent=parent)
+    box.setInformativeText(f"{error.advice}<br><br>{html.escape(error.fingerprint_label)}:<br>"
+                           f"<tt>{html.escape(error.fingerprint_text)}</tt>")
+    trust = box.addButton(error.button, QMessageBox.ButtonRole.AcceptRole)
     box.addButton(QMessageBox.StandardButton.Cancel)
     box.exec()
-    if box.clickedButton() is not trust or not error.fingerprint:
+    if box.clickedButton() is not trust or not error.can_trust:
         return False
-    upload.trust_certificate(error.host, error.port, error.fingerprint)
+    error.trust()
     return True
 
 
 class TrustedCertsDialog(QDialog):
-    """Lists pinned self-signed certificates; Remove forgets one."""
+    """Lists the servers trusted for uploads (pinned self-signed certificates, SSH host keys);
+    Remove forgets one."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Trusted certificates")
+        self.setWindowTitle("Trusted servers")
         self.resize(640, 300)
         v = QVBoxLayout(self)
         self.list = QListWidget()
-        v.addWidget(QLabel("Upload servers whose self-signed certificate you trusted:"))
+        v.addWidget(QLabel("Upload servers whose self-signed certificate or SSH host key you trusted:"))
         v.addWidget(self.list, 1)
+        v.addWidget(_hint("SSH servers in ~/.ssh/known_hosts are trusted too; they aren't listed here."))
         row = QHBoxLayout()
         self.b_remove = QPushButton(QIcon.fromTheme("list-remove"), "Remove")
         self.b_remove.clicked.connect(self._remove)
@@ -786,8 +840,15 @@ class TrustedCertsDialog(QDialog):
     def _fill(self):
         self.list.clear()
         for hp, fp in sorted((settings.get("upload.trusted_certs") or {}).items()):
-            item = QListWidgetItem(f"{hp}\n    {upload.pretty_fingerprint(fp)}")
-            item.setData(Qt.ItemDataRole.UserRole, hp)
+            item = QListWidgetItem(QIcon.fromTheme("security-medium"),
+                                   f"{hp}  —  TLS certificate\n    SHA-256 {upload.pretty_fingerprint(fp)}")
+            item.setData(Qt.ItemDataRole.UserRole, ("tls", hp))
+            self.list.addItem(item)
+        for host, value in sorted(upload.trusted_host_keys().items()):
+            keytype, _, b64 = str(value).partition(" ")
+            item = QListWidgetItem(QIcon.fromTheme("network-server"),
+                                   f"{host}  —  SSH host key ({keytype})\n    {upload.ssh_fingerprint(b64)}")
+            item.setData(Qt.ItemDataRole.UserRole, ("ssh", host))
             self.list.addItem(item)
         self.b_remove.setEnabled(self.list.count() > 0)
 
@@ -795,6 +856,10 @@ class TrustedCertsDialog(QDialog):
         item = self.list.currentItem()
         if item is None:
             return
-        host, _, port = item.data(Qt.ItemDataRole.UserRole).rpartition(":")
-        upload.untrust_certificate(host, int(port))
+        kind, name = item.data(Qt.ItemDataRole.UserRole)
+        if kind == "ssh":
+            upload.untrust_host_key(name)
+        else:
+            host, _, port = name.rpartition(":")
+            upload.untrust_certificate(host, int(port))
         self._fill()
