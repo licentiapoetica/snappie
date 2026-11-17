@@ -187,6 +187,11 @@ copied. While uploading, the tray icon shows the percentage; cancel from the
 tray menu. Settings → Uploads can also show it in Plasma's notifications, with
 speed, time left and a Cancel button.
 
+To check an uploader, use **Test Upload**, then **Show Response…** to see what
+the server answered: status, headers and body. A JSON body shows as a tree;
+click a value to get its `{json:…}` path. You can also try any expression
+(`{json:…}`, `{regex:…}`, `{header:…}`) against the response.
+
 **Sounds** for a screenshot, the start and end of a recording, a finished
 upload, or an error can be turned on in Settings → Sounds. They come from your
 sound theme, or pick your own files (WAV, OGG, FLAC, MP3, …). The start sound

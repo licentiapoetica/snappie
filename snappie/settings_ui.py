@@ -415,11 +415,19 @@ class SettingsDialog(QDialog):
         h.addLayout(col)
         v.addWidget(box, 1)
 
+        row = QHBoxLayout()
         self.test_result = QLabel()
         self.test_result.setWordWrap(True)
         self.test_result.setOpenExternalLinks(True)
         self.test_result.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        v.addWidget(self.test_result)
+        row.addWidget(self.test_result, 1)
+        self.b_response = QPushButton(QIcon.fromTheme("document-preview"), "Show Response…")
+        self.b_response.setToolTip("What the server answered to the test upload, and what the uploader "
+                                   "reads from it ({json:…} paths, headers)")
+        self.b_response.clicked.connect(self._show_response)
+        self.b_response.hide()
+        row.addWidget(self.b_response, 0, Qt.AlignmentFlag.AlignTop)
+        v.addLayout(row)
 
         box, form = _form("After uploading")
         form.addRow(self._bind("upload.copy_url", QCheckBox("Copy the URL to the clipboard")))
@@ -429,6 +437,7 @@ class SettingsDialog(QDialog):
         v.addWidget(_hint("Hosts like catbox.moe, Zipline, XBackBone and Chevereto offer .sxcu files; "
                           "you can also export them from ShareX on Windows."))
         self._uploader = None
+        self._response = None     # (response, uploader config, file name) of the last test upload
         return page
 
     def _sounds(self):
@@ -687,20 +696,29 @@ class SettingsDialog(QDialog):
         if not name or self._uploader is not None:
             return
         path = test_image()
+        self._response = None
+        self.b_response.hide()
         self._uploader = upload.Uploader(self)
-        self._uploader.finished.connect(lambda res, err: self._test_done(path, res, err))
+        self._uploader.finished.connect(lambda res, err: self._test_done(path, name, res, err))
         self.b_test.setEnabled(False)
         self.test_result.setStyleSheet("")
         self.test_result.setText(f"Uploading a test image with {self.up_list.currentItem().text()}…")
         self._uploader.start(path, name)
 
-    def _test_done(self, path, res, err):
+    def _test_done(self, path, name, res, err):
         try:
             os.remove(path)
         except OSError:
             pass
         error = getattr(self._uploader, "error", None)
+        response = self._uploader.response
         self._uploader = None
+        if response is not None:
+            try:
+                self._response = (response, upload.resolve(name), os.path.basename(path))
+                self.b_response.show()
+            except upload.UploadError:
+                pass
         self._uploader_selected()
         if isinstance(error, upload.UntrustedCertificate) and ask_trust(self, error):
             self._test_upload()
@@ -714,6 +732,13 @@ class SettingsDialog(QDialog):
             return f'<a href="{u}">{u}</a>'
         extra = f"<br>Deletion URL: {link(res.delete_url)}" if res.delete_url else ""
         self.test_result.setText(f"Uploaded: {link(res.url)}{extra}")
+
+    def _show_response(self):
+        if self._response:
+            from .response_view import ResponseDialog
+            dlg = ResponseDialog(*self._response, parent=self)
+            dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            dlg.show()
 
 
 def ask_trust(parent, error):

@@ -35,7 +35,7 @@ BODIES = ("None", "MultipartFormData", "FormURLEncoded", "JSON", "XML", "Binary"
 
 
 class UploadError(Exception):
-    pass
+    response = None   # the server's answer when there was one (requests.Response), for inspecting it
 
 
 class Cancelled(UploadError):
@@ -126,11 +126,12 @@ def _pinned_session(host, port, fingerprint):
 
 
 class UploadResult:
-    def __init__(self, url, delete_url="", thumbnail_url="", response=""):
+    def __init__(self, url, delete_url="", thumbnail_url="", response="", http=None):
         self.url = url
         self.delete_url = delete_url or ""
         self.thumbnail_url = thumbnail_url or ""
         self.response = response
+        self.http = http           # the requests.Response
 
     def __repr__(self):
         return f"UploadResult({self.url!r}, delete_url={self.delete_url!r})"
@@ -479,6 +480,24 @@ def json_path(data, path):
     return data
 
 
+_PLAIN_KEY = re.compile(r"[A-Za-z_][\w-]*\Z")
+
+
+def json_path_to(keys):
+    """The path json_path() follows to reach `keys` (dict keys and list indexes), ready to put
+    inside `{json:...}`: `files[0].url`, `['odd.key']`."""
+    out = []
+    for k in keys:
+        if isinstance(k, int):
+            out.append(f"[{k}]")
+        elif _PLAIN_KEY.match(k):
+            out.append(("." if out else "") + k)
+        else:
+            q = "'" if "'" not in k else '"'
+            out.append(f"[{q}{k}{q}]")
+    return _esc("".join(out))
+
+
 def xpath(root, path):
     """Text of the first node matching a simple XPath (`/files/file/url`, `//url`, `a/@attr`)."""
     path = path.strip()
@@ -709,14 +728,18 @@ def upload(path, uploader=None, session=None, progress=None, cancel=None):
     syn.response = resp
     if resp.status_code >= 400:
         msg = syn.render(cfg.get("ErrorMessage") or "").strip() or _excerpt(resp.text)
-        raise UploadError(f"HTTP {resp.status_code} {resp.reason or ''}".strip() + (f": {msg}" if msg else ""))
+        err = UploadError(f"HTTP {resp.status_code} {resp.reason or ''}".strip() + (f": {msg}" if msg else ""))
+        err.response = resp
+        raise err
 
     result = syn.render(cfg.get("URL") or "").strip() if cfg.get("URL") else resp.text.strip()
     if not result:
         msg = syn.render(cfg.get("ErrorMessage") or "").strip() or _excerpt(resp.text) or "empty response"
-        raise UploadError(f"No URL in the response: {msg}")
+        err = UploadError(f"No URL in the response: {msg}")
+        err.response = resp
+        raise err
     return UploadResult(result, syn.render(cfg.get("DeletionURL") or "").strip(),
-                        syn.render(cfg.get("ThumbnailURL") or "").strip(), resp.text)
+                        syn.render(cfg.get("ThumbnailURL") or "").strip(), resp.text, resp)
 
 
 def _host(url):
@@ -749,6 +772,7 @@ class Uploader(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.error = None
+        self.response = None                 # the server's answer (requests.Response), also on errors
         self._cancel = threading.Event()
         self._last = 0.0
         self._done.connect(self._finish, Qt.ConnectionType.QueuedConnection)
@@ -769,12 +793,14 @@ class Uploader(QObject):
             self._progress.emit(sent, total)
 
     def _work(self, path, uploader):
-        self.error = None
+        self.error = self.response = None
         try:
             res, err = upload(path, uploader, progress=self._report, cancel=self._cancel), ""
+            self.response = res.http
         except UploadError as e:
             res, err = None, str(e)
             self.error = e       # e.g. UntrustedCertificate: the caller can offer to trust it
+            self.response = e.response
         except Exception as e:  # noqa: BLE001 - never leave the caller waiting
             res, err = None, f"Upload failed: {e}"
         self._done.emit(res, err)

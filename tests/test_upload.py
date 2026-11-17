@@ -150,3 +150,30 @@ def test_file_shrinking_while_sending_is_an_error(tmp_path):
     with pytest.raises(upload.UploadError, match="changed"):
         b.read()
     b.close()
+
+
+@pytest.mark.parametrize("keys", [
+    ["files", 0, "url"], ["a b", "x.y"], ["$id"], ["it's", 2], ["{json}|\\"], [""], ["0"], ["-1"]])
+def test_json_path_to_round_trips_through_the_syntax(keys):
+    data = {}
+    node = data
+    for k, nxt in zip(keys, keys[1:] + ["found"]):
+        child = "found" if nxt == "found" else ([None] * (nxt + 1) if isinstance(nxt, int) else {})
+        node[k] = child
+        node = child
+    syn = upload.Syntax()
+    syn.response = type("R", (), {"text": json.dumps(data), "url": "", "headers": {}})()
+    assert syn.render("{json:%s}" % upload.json_path_to(keys)) == "found"
+
+
+def test_json_path_to_plain_form():
+    assert upload.json_path_to(["files", 0, "url"]) == "files[0].url"
+    assert upload.json_path_to(["data", "a.b"]) == "data['a.b']"
+
+
+def test_response_kept_on_success_and_on_errors(server, blob):
+    res = upload.upload(str(blob), cfg(server, "Binary"))
+    assert res.http.status_code == 200 and res.http.json()["url"] == res.url
+    with pytest.raises(upload.UploadError) as e:
+        upload.upload(str(blob), cfg(server, "Binary", URL="{json:nope}"))
+    assert "No URL" in str(e.value) and e.value.response.json()["len"] == blob.stat().st_size
