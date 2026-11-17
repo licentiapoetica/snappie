@@ -542,8 +542,6 @@ class App(QObject):
         return img
 
     def _shot_picked(self, sel, opts, remember=True):
-        from . import sound
-        sound.play("shot")
         if remember:
             self.remember_selection(sel)
         then = opts.get("then")
@@ -644,6 +642,9 @@ class App(QObject):
                     done.append("saved")
         if "copy" in actions and not path:
             history.add_copied(img)    # not saved anywhere: keep it for the history
+        if done or path:
+            from . import sound
+            sound.play("shot")         # now it's taken: copied or saved, not just selected
         if "pin" in actions:
             self.pin(img, origin)
         if "edit" in actions:
