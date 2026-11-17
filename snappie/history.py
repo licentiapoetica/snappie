@@ -473,8 +473,9 @@ class HistoryWindow(QMainWindow):
         self.view.setItemDelegate(_Delegate(self.view))
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._context_menu)
-        self.view.doubleClicked.connect(lambda ix: self._do("open"))
-        self.view.activated.connect(lambda ix: self._do("open"))
+        # activated: double click (or single click, as Plasma is set) and Enter; doubleClicked would
+        # fire as well and open everything twice
+        self.view.activated.connect(lambda ix: self._activate())
         self.view.selectionModel().currentChanged.connect(lambda *_: self._sync_buttons())
         self.empty = QLabel("Nothing captured yet.\nScreenshots and recordings show up here.")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -597,6 +598,14 @@ class HistoryWindow(QMainWindow):
         add("Remove from History", "remove", "list-remove")
         add("Delete File…", "delete", "edit-delete")
         m.exec(self.view.viewport().mapToGlobal(pos))
+
+    def _activate(self):
+        """Screenshots open in our editor; videos and GIFs in their default app."""
+        e = self.current()
+        if e and e.get("kind") == "image" and os.path.exists(e["path"]):
+            self._do("edit")
+        else:
+            self._do("open")
 
     def _do(self, name):
         e = self.current()

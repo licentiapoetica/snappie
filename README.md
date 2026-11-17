@@ -171,7 +171,7 @@ corners, shadow).
 Copy, save (`~/Pictures/Snappie`), upload, pin to the screen (always on top;
 wheel zooms), and OCR. Pick the defaults in Settings. Every capture lands in the
 **history**, which shows thumbnails and lets you open, copy, upload, edit, pin
-or delete. That includes screenshots you only copied: Snappie keeps a copy in
+or delete. Opening a screenshot there opens it in Snappie's editor. That includes screenshots you only copied: Snappie keeps a copy in
 `~/.local/share/snappie/clipboard/` and removes it when the history entry goes.
 
 **Uploads** use ShareX custom uploaders: import any `.sxcu` file (Zipline,
