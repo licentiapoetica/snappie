@@ -448,7 +448,7 @@ class SettingsDialog(QDialog):
             browse = QToolButton()
             browse.setIcon(QIcon.fromTheme("document-open"))
             browse.setToolTip("Choose a sound file")
-            browse.clicked.connect(lambda _=False, e=path: self._pick_sound(e))
+            browse.clicked.connect(lambda _=False, e=path, ev=event: self._pick_sound(e, ev))
             test = QToolButton()
             test.setIcon(QIcon.fromTheme("media-playback-start"))
             test.setToolTip("Play")
@@ -468,18 +468,28 @@ class SettingsDialog(QDialog):
         v.addStretch(1)
         return page
 
-    def _pick_sound(self, edit):
+    def _pick_sound(self, edit, event):
         start = os.path.dirname(edit.text()) if edit.text() else "/usr/share/sounds"
-        path, _ = QFileDialog.getOpenFileName(self, "Choose a sound", start,
-                                              "Sounds (*.oga *.ogg *.opus *.wav *.flac *.mp3);;All files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a sound", start,
+            "Sounds (*.oga *.ogg *.opus *.wav *.flac *.mp3 *.m4a *.aac);;All files (*)")
         if path:
             edit.setText(path)
+            self._test_sound(event, path)    # hear it, and find out now if it can't be played
 
     def _test_sound(self, event, custom):
         from . import sound
         path = sound.file_for(event, custom)
-        if not path or not sound.play_file(path, self.sound_volume.value()):
-            QMessageBox.warning(self, "Sound", "This sound can't be played." if path else "No sound file found.")
+
+        def failed(message):
+            QMessageBox.warning(self, "Sound",
+                                f"Snappie can't play {os.path.basename(path)}:\n{message}\n\n"
+                                "Choose a WAV, OGG or FLAC file, or install the GStreamer plugins "
+                                "for this format.")
+        if not path:
+            QMessageBox.warning(self, "Sound", "No sound file found.")
+        elif not sound.play_file(path, self.sound_volume.value(), on_error=failed):
+            failed("GStreamer couldn't start playing it.")
 
     def _hotkeys(self):
         page = QWidget()

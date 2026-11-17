@@ -1,8 +1,10 @@
 """Event sounds: screenshot taken, recording started / saved, upload finished, errors.
 
 Played in this process with GStreamer's playbin (GStreamer is needed for recording anyway),
-so any format GStreamer reads works and no player program is needed.  The sound is tagged
-as an event sound, so Plasma's volume applet counts it as a notification sound.
+so any format GStreamer reads works (WAV, OGG, Opus, FLAC, MP3, …) and no player program is
+needed.  The stream is Snappie's own, not tagged as an event sound: Plasma routes event sounds
+through its "Notification Sounds" volume, and people who mute system notification sounds still
+want the sounds they turned on here (they get a "Snappie" slider in the volume applet instead).
 
 Default sounds come by name from the freedesktop sound theme spec: the KDE sound theme first
 (System Settings → Sounds), then Ocean, then freedesktop.  Each event can use a file instead.
@@ -79,8 +81,9 @@ def play(event, then=None):
             then()
 
 
-def play_file(path, volume=70, then=None):
-    """Play a file at volume 0..100 (as a volume slider shows it). Returns False if it can't."""
+def play_file(path, volume=70, then=None, on_error=None):
+    """Play a file at volume 0..100 (as a volume slider shows it). Returns False if it can't
+    start; on_error(message) is called if it fails later (e.g. no decoder for the format)."""
     try:
         import gi
         gi.require_version("Gst", "1.0")
@@ -100,7 +103,8 @@ def play_file(path, volume=70, then=None):
     if sink is not None:
         try:
             sink.set_property("stream-properties",
-                              Gst.Structure.new_from_string("props, media.role=event, application.name=Snappie"))
+                              Gst.Structure.new_from_string("props, application.name=Snappie, "
+                                                            "application.icon_name=snappie"))
             pb.set_property("audio-sink", sink)
         except (TypeError, ValueError):
             pass
@@ -121,6 +125,8 @@ def play_file(path, volume=70, then=None):
         if msg.type == Gst.MessageType.ERROR:
             err, _ = msg.parse_error()
             log(f"sound {path}: {err.message}")
+            if on_error:
+                on_error(err.message)
             finish()
         elif msg.type == Gst.MessageType.EOS:
             finish()

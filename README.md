@@ -183,8 +183,10 @@ speed, time left and a Cancel button.
 
 **Sounds** for a screenshot, the start and end of a recording, a finished
 upload, or an error can be turned on in Settings → Sounds. They come from your
-sound theme, or pick your own files. The start sound plays before the recording
-begins, so it isn't recorded.
+sound theme, or pick your own files (WAV, OGG, FLAC, MP3, …). The start sound
+plays before the recording begins, so it isn't recorded. They play even when
+Plasma's notification sounds are muted, and get their own "Snappie" slider in
+the volume applet.
 
 ## Recording
 
