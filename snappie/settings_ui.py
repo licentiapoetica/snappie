@@ -48,6 +48,63 @@ class _Checklist(QWidget):
             cb.setChecked(k in (v or []))
 
 
+class _AppList(QWidget):
+    """App names for recording only some apps' sound: the apps playing right now plus the
+    chosen ones, as checkboxes; apps that aren't playing can be added by name."""
+
+    def __init__(self):
+        super().__init__()
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        self.list = QListWidget()
+        self.list.setMaximumHeight(130)
+        v.addWidget(self.list)
+        row = QHBoxLayout()
+        self.name = QLineEdit(placeholderText="App name, binary or Flatpak id")
+        self.name.returnPressed.connect(self._add)
+        add = QPushButton(QIcon.fromTheme("list-add"), "Add")
+        add.clicked.connect(self._add)
+        refresh = QToolButton(icon=QIcon.fromTheme("view-refresh"), toolTip="List the apps playing sound now")
+        refresh.clicked.connect(lambda: self.setValue(self.value(), rescan=True))
+        row.addWidget(self.name, 1)
+        row.addWidget(add)
+        row.addWidget(refresh)
+        v.addLayout(row)
+        self._playing = None
+
+    def _item(self, name, checked):
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            if it.text().lower() == name.lower():
+                if checked:
+                    it.setCheckState(Qt.CheckState.Checked)
+                return
+        it = QListWidgetItem(name)
+        it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        it.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        self.list.addItem(it)
+
+    def _add(self):
+        name = self.name.text().strip()
+        if name:
+            self._item(name, True)
+            self.name.clear()
+
+    def value(self):
+        return [self.list.item(i).text() for i in range(self.list.count())
+                if self.list.item(i).checkState() == Qt.CheckState.Checked]
+
+    def setValue(self, v, rescan=False):
+        if self._playing is None or rescan:
+            from . import appaudio
+            self._playing = appaudio.playing_apps()
+        self.list.clear()
+        for name in v or []:
+            self._item(name, True)
+        for name in self._playing:
+            self._item(name, False)
+
+
 class _Folder(QWidget):
     def __init__(self, default):
         super().__init__()
@@ -239,6 +296,7 @@ class SettingsDialog(QDialog):
             put(source[key] if source is not None else settings.get(key))
         # not a setting: an autostart entry (on by default, install.sh adds it)
         self.autostart.setChecked(True if source is not None else _autostart_enabled())
+        self._sync_audio()
         if source is None:   # restoring defaults keeps the chosen uploader
             self._default_uploader = settings.get("upload.uploader") or ""
         self._refresh_uploaders()
@@ -343,8 +401,37 @@ class SettingsDialog(QDialog):
         fps.setSpecialValueText("Native (variable)")
         form.addRow("Frame rate:", fps)
         form.addRow(self._bind("cursor", QCheckBox("Record the mouse cursor")))
-        form.addRow(self._bind("rec.audio", QCheckBox("Record desktop audio")))
-        form.addRow(self._bind("rec.mic", QCheckBox("Record the microphone")))
+        audio = self._bind("rec.audio", QCheckBox("Record desktop audio"))
+        form.addRow(audio)
+        mode = self._bind("rec.audio_apps", _combo([
+            ("All apps", "all"), ("Only the apps ticked below", "only"), ("All apps except the ones ticked below", "except")]))
+        mode.setToolTip("Leave out voice chat, music and notifications, or record just a game.\n"
+                        "Change it while recording with the ♪ button on the recording bar.")
+        form.addRow("Apps:", mode)
+        apps = self._bind("rec.audio_app_list", _AppList())
+        form.addRow("", apps)
+        from . import appaudio
+        apps_hint = _hint("Apps show up here while they play sound. They still play to your speakers.")
+        if not appaudio.available():
+            from .deps import install_hint
+            apps_hint.setText(f"Picking apps needs the PipeWire tools ({install_hint(['pw-tools'])}). Without "
+                              "them, \"All apps\" records the whole desktop and the other choices no desktop audio.")
+        form.addRow("", apps_hint)
+
+        def sync():
+            mode.setEnabled(audio.isChecked())
+            apps.setEnabled(audio.isChecked() and mode.currentData() != "all")
+        audio.toggled.connect(sync)
+        mode.currentIndexChanged.connect(sync)
+        self._sync_audio = sync
+        mic = self._bind("rec.mic", QCheckBox("Record the microphone"))
+        mic.setToolTip("Mute and unmute it while recording with the microphone button on the bar.")
+        form.addRow(mic)
+        ask = self._bind("rec.audio_ask", QCheckBox("Ask which apps to record before starting"))
+        ask.setToolTip("Shows the apps playing sound and the microphone under the area; Enter starts.\n"
+                       "What you tick there becomes the setting above.")
+        ask.setEnabled(appaudio.available())
+        form.addRow(ask)
         v.addWidget(box)
 
         box, form = _form("While recording")

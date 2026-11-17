@@ -76,6 +76,11 @@ def _record_args(r):
     r.add_argument("--qp", type=int, help="constant quantizer instead of capped VBR (overrides --quality)")
     r.add_argument("--fps", type=int, help="force a constant frame rate (default: native, variable)")
     r.add_argument("--no-audio", action="store_true", help="don't record desktop audio")
+    a = r.add_mutually_exclusive_group()
+    a.add_argument("--app", action="append", metavar="NAME",
+                   help="record only this app's sound (repeatable; app name, binary or Flatpak id)")
+    a.add_argument("--exclude-app", action="append", metavar="NAME",
+                   help="record all desktop audio except this app's (repeatable)")
     r.add_argument("--mic", action="store_true", help="also record (mix in) the default microphone")
     r.add_argument("--no-cursor", action="store_true", help="don't record the mouse cursor")
     r.add_argument("--container", choices=["mp4", "mkv", "webm"],

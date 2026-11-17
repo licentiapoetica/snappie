@@ -17,7 +17,7 @@ from .app_util import log
 
 class Recording:
     def __init__(self, app, sel, opts, on_end):
-        """sel: picker.Selection. opts: dict (codec, quality, qp, fps, audio, mic, container, anim,
+        """sel: picker.Selection. opts: dict (codec, quality, qp, fps, audio, apps, mic, container, anim,
         duration, output, delay). on_end(path or None, error or None)."""
         self.app, self.kwin, self.sel, self.opts, self.on_end = app, app.kwin, sel, opts, on_end
         self.stream = None
@@ -39,18 +39,110 @@ class Recording:
         self._target_origin = None
         self._push_pending = False
         self._ended = False
+        self.app_audio = None    # appaudio.AppAudio: the apps and mic the recording hears
+        self._audio_device = None
+        self._audio_off = False  # couldn't pick apps: no desktop audio rather than all of it
+        self._mic_fallback = False
+        self.chooser = None
 
     # -- start --
 
     def start(self):
-        # give KWin a moment to remove the picker overlays before the first frame; the start
-        # sound plays before the stream opens, so the desktop audio doesn't record it
+        from . import appaudio
+        if self.opts.get("ask_audio") and not self.opts.get("anim") and appaudio.available():
+            self._ask_audio()
+        else:
+            self._begin()
+
+    def _begin(self, ticks=None, mic=None):
+        # give KWin a moment to remove the picker overlays (and the sound chooser) before the first
+        # frame; the start sound plays before the stream opens, so the desktop audio doesn't record it
         from . import sound
 
         def go():
             sound.play("record_start", then=lambda: None if self._ended else self._open_stream())
             return False
+        self._start_app_audio(ticks, mic)
         GLib.timeout_add(max(300, int(self.opts.get("delay", 0) * 1000)), go)
+
+    def _audio_rule(self):
+        """(mode, names) for the desktop audio before any ticks; no desktop audio = no app (yet)."""
+        if not self.opts.get("audio"):
+            return "only", []
+        return self.opts.get("apps") or ("all", [])
+
+    def _ask_audio(self):
+        from . import appaudio
+        from .controls import SoundChooser
+        mode, names = self._audio_rule()
+        try:
+            items = appaudio.choices(appaudio.dump(), appaudio.Selection(mode, names), os.getpid())
+        except Exception as e:
+            log("can't list apps playing sound:", e)
+            items = []
+        self.chooser = SoundChooser([(n, on) for n, on, _ in items], bool(self.opts.get("mic")))
+        keys = {n: k for n, _, k in items}
+
+        def accepted(ticks, mic):
+            self._close_chooser()
+            if self.opts.get("audio") and ticks:
+                new_mode, new_names = appaudio.remembered(mode, names, {n: (on, keys[n]) for n, on in ticks.items()})
+                settings.save(**{"rec.audio_apps": new_mode, "rec.audio_app_list": new_names})
+            if mic != bool(settings.get("rec.mic")):
+                settings.save(**{"rec.mic": mic})
+            if self.sel.win:  # typing should go back to the recorded window
+                self.kwin.activate(self.sel.win["id"])
+            self._begin(ticks, mic)
+
+        def cancelled():
+            self._close_chooser()
+            log("recording cancelled")
+            self._end(None, None)
+        self.chooser.accepted.connect(accepted)
+        self.chooser.cancelled.connect(cancelled)
+        self.chooser.show()
+        r = self.sel.rect
+        rect, target = (r.x(), r.y(), r.width(), r.height()), None
+        if self.sel.win:
+            fx, fy = self.sel.win["frame"][:2]
+            rect, target = (r.x() - fx, r.y() - fy, r.width(), r.height()), self.sel.win["id"]
+        self.kwin.place(SoundChooser.TITLE, rect, target, mode="below", activate=True)
+
+    def _close_chooser(self):
+        if self.chooser:
+            self.kwin.unplace(self.chooser.TITLE)
+            self.chooser.hide()
+            self.chooser.deleteLater()
+            self.chooser = None
+
+    def _start_app_audio(self, ticks=None, mic=None):
+        if self.opts.get("anim"):
+            return
+        from .appaudio import AppAudio, available
+        mode, names = self._audio_rule()
+        mic = bool(self.opts.get("mic")) if mic is None else mic
+        if not available():
+            # the plain way: the default output's monitor (+ the mic), all or nothing
+            self._mic_fallback = mic
+            if self.opts.get("audio") and mode != "all":
+                self._no_app_audio("needs the PipeWire tools (see `snappie deps`)")
+            return
+        audio = AppAudio(mode, names, mic, ticks)
+        try:
+            audio.start()
+        except Exception as e:
+            self._mic_fallback = mic
+            if self.opts.get("audio"):
+                self._no_app_audio(str(e))
+            return
+        self.app_audio, self._audio_device = audio, audio.device
+
+    def _no_app_audio(self, why):
+        # recording everything would include what was meant to be left out (voice chat)
+        log("can't pick the apps to record:", why)
+        self._audio_off = True
+        self.app.notifier.notify("Recording without desktop sound",
+                                 f"Couldn't pick the apps to record: {why}", icon="dialog-warning")
 
     def _open_stream(self):
         from PyQt6.QtGui import QGuiApplication
@@ -104,8 +196,10 @@ class Recording:
             self.rec = Recorder(self.node, self.ref, self.rect, path, codec=self.codec,
                                 quality=o["quality"], qp=o.get("qp"), fps=o.get("fps") or None,
                                 scale=self.scale, crop=self._crop,
-                                system_audio=o["audio"] and not o.get("anim"),
-                                mic=o["mic"] and not o.get("anim"),
+                                system_audio=bool(self.app_audio) or (o["audio"] and not o.get("anim")
+                                                                      and not self._audio_off),
+                                audio_device=self._audio_device,
+                                mic=self._mic_fallback and not self.app_audio and not o.get("anim"),
                                 overlay=bool(self.sel.win), on_done=self._recorded, on_error=self._fail)
             self.rec.start()
         except Exception as e:
@@ -195,6 +289,9 @@ class Recording:
         self.controls.stop_clicked.connect(self.stop)
         self.controls.pause_toggled.connect(lambda on: self.pause() if on else self.resume())
         self.controls.draw_toggled.connect(self.set_drawing)
+        if self.app_audio:
+            a = self.app_audio
+            self.controls.set_audio_menu(a.menu, a.set_app, a.mic, a.set_mic)
         self.controls.show()
         rect, target = self._area_for_kwin()
         self.kwin.place(TITLE, rect, target, mode="below")
@@ -489,6 +586,10 @@ class Recording:
         if self._ended:
             return
         self._ended = True
+        self._close_chooser()
+        if self.app_audio:
+            self.app_audio.stop()
+            self.app_audio = None
         self.on_end(path, error)
 
 

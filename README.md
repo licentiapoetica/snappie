@@ -27,7 +27,8 @@ KDE Plasma 6 (Wayland), Python 3 with PyQt6, dbus-python, PyGObject, NumPy and
 Requests, GStreamer with the PipeWire, base, good and VA plugins, ffmpeg, and
 the Wayland client library. Source installs also need gcc + Wayland headers
 to build the capture helper. Optional: tesseract (OCR),
-python-evdev (clicks and keys in recordings), the OpenSSH client (SFTP uploads),
+python-evdev (clicks and keys in recordings), the PipeWire tools `pw-cli`,
+`pw-dump` and `pw-link` (recording only some apps' sound), the OpenSSH client (SFTP uploads),
 and CMake, a C++ compiler and the KF6 Purpose headers (the Share menu entry).
 
 `snappie deps` checks all of it and prints the install command for your distro;
@@ -49,7 +50,7 @@ sudo zypper install python3-PyQt6 python3-dbus-python python3-gobject python3-nu
     python3-requests typelib-1_0-Gst-1_0 gstreamer-plugin-pipewire gstreamer-plugins-base \
     gstreamer-plugins-good gstreamer-plugins-bad ffmpeg libwayland-client0
 sudo zypper install gcc pkgconf-pkg-config wayland-devel   # source installs
-sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evdev   # optional
+sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evdev pipewire-tools   # optional
 sudo zypper install cmake gcc-c++ kf6-purpose-devel kf6-kcoreaddons-devel qt6-dbus-devel   # optional: Share menu
 ```
 
@@ -60,7 +61,7 @@ sudo apt install python3-pyqt6 python3-pyqt6.qtsvg python3-dbus python3-gi pytho
     python3-requests gir1.2-gstreamer-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good gstreamer1.0-plugins-bad ffmpeg libwayland-client0
 sudo apt install gcc pkg-config libwayland-dev libwayland-bin   # source installs
-sudo apt install tesseract-ocr tesseract-ocr-eng python3-evdev   # optional
+sudo apt install tesseract-ocr tesseract-ocr-eng python3-evdev pipewire-bin   # optional
 sudo apt install cmake g++ libkf6purpose-dev libkf6coreaddons-dev qt6-base-dev   # optional: Share menu
 ```
 
@@ -241,7 +242,8 @@ the volume applet.
 
 ## Recording
 
-While recording, a small bar sits under the area: timer, pause, draw, stop.
+While recording, a small bar sits under the area: timer, pause, draw, sound,
+microphone, stop.
 
 - **Pause** leaves the paused time out of the file.
 - **Draw** lets you draw on the area (pen; Shift for arrows, R for boxes,
@@ -249,6 +251,20 @@ While recording, a small bar sits under the area: timer, pause, draw, stop.
 - **Click and key visualizer** (Settings or `--clicks --keys`) shows mouse
   clicks as ripples and pressed keys as a bubble. It reads the input devices,
   so your user must be in the `input` group.
+- **Sound** is asked for before each recording: a small panel under the area
+  lists the apps playing sound and your microphone. Untick voice chat, music
+  or a video you don't want in the recording, then press Enter (Esc cancels).
+  Your choices are remembered for next time. Apps that start playing later
+  follow Settings → Recording → Apps (all apps, only some, or all except
+  some). The apps still play to your speakers.
+- While recording, ♪ on the bar turns apps on and off, and the microphone
+  button mutes and unmutes your mic.
+- `--app NAME` and `--exclude-app NAME` pick the apps for one recording
+  without asking (repeatable; the app name, its binary or its Flatpak id).
+  Turn the question off in Settings → Recording.
+- Picking apps needs the PipeWire tools (`pw-cli`, `pw-dump`, `pw-link`).
+  Without them Snappie records the whole desktop ("All apps") or, if you
+  chose apps, no desktop sound rather than all of it.
 
 Stop with the bar, the tray icon, Ctrl+C, or `snappie stop`. Files go to
 `~/Videos/Snappie/`.
@@ -286,8 +302,8 @@ There are two ways to find what's inside a window:
   refresh rate), with real frame timing; `--fps 60` forces a constant rate.
 - HEVC through VAAPI, capped VBR: a bitrate ceiling sized to the area keeps
   games and video small, and a quality floor keeps static content crisp.
-  Audio is Opus 192 kbps from the desktop (`--mic` mixes in the microphone,
-  `--no-audio` turns sound off).
+  Audio is Opus 192 kbps from the desktop or the chosen apps (`--mic` mixes
+  in the microphone, `--no-audio` turns sound off).
 - Recorded as MKV, so a crash won't lose the file, then remuxed losslessly to
   MP4 (or WebM with `--container webm`, or kept as MKV with `--mkv`).
 - GIF uses one optimized palette for the whole clip (`gif.fps`, `gif.max_width`

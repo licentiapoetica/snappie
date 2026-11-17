@@ -130,7 +130,9 @@ class Recorder:
 
     def __init__(self, node, ref, rect, path, codec="hevc", quality="good", qp=None, crop=None,
                  fps=None, scale=1.0, system_audio=True, mic=False, overlay=False,
-                 on_done=None, on_error=None):
+                 audio_device=None, on_done=None, on_error=None):
+        """audio_device: the desktop audio source (default: the default output's monitor;
+        appaudio's private sink when only some apps are recorded)."""
         self.ref, self.rect, self.path = ref, rect, path
         self._last_pts = None
         self.codec = codec
@@ -154,7 +156,7 @@ class Recorder:
         desc.append(f" ! {_convert(codec)} ! {enc} ! queue ! mux.")
         sources = []
         if system_audio:
-            sources.append("pulsesrc device=@DEFAULT_MONITOR@ client-name=snappie")
+            sources.append(f"pulsesrc device={audio_device or '@DEFAULT_MONITOR@'} client-name=snappie")
         if mic:
             sources.append("pulsesrc device=@DEFAULT_SOURCE@ client-name=snappie-mic")
         if len(sources) == 1:

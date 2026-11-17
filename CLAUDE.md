@@ -39,7 +39,7 @@ artifacts. `.github/scripts/` contains the version gate, wheel smoke check (also
 Runtime deps: python3-pyqt6 (incl. QtSvg), python3-dbus, PyGObject with GStreamer +
 GLib, numpy, gstreamer `pipewiresrc` and VA plugins (`vah265enc`/`vah264enc`/`vaav1enc`,
 `vapostproc`), libwayland-client, ffmpeg (GIF/WebP),
-optional tesseract (OCR), OpenSSH client (SFTP uploads), Noto Color Emoji font. libatspi via gi for the a11y picker.
+optional tesseract (OCR), PipeWire tools `pw-cli`/`pw-dump`/`pw-link` (per-app audio), OpenSSH client (SFTP uploads), Noto Color Emoji font. libatspi via gi for the a11y picker.
 Source builds/checkouts additionally need gcc + pkg-config + wayland-devel + wayland-scanner.
 
 ## Layout
@@ -54,6 +54,7 @@ Source builds/checkouts additionally need gcc + pkg-config + wayland-devel + way
 | `snappie/capture_helper.py` | installs bundled helper, compiles checkout sources on demand, registers with KWin |
 | `snappie/helper/snappie-cast.c` | C helper: `zkde_screencast_unstable_v1` streams + `org_kde_kwin_fake_input` |
 | `snappie/recorder.py` | GStreamer pipeline: pipewiresrc → crop → VAAPI encode + Opus audio → MKV |
+| `snappie/appaudio.py` | recording sound: private null sink via a `pw-cli` child, chosen apps and the mic linked in (live); `plan` is pure |
 | `snappie/recording.py` | one recording: segments (pause/reconnect), join, remux MP4 / convert GIF/WebP |
 | `snappie/convert.py` | ffmpeg conversions any ↔ any (GIF/WebP/MP4/WebM): cuts, crop, speed, black bars; `build` is pure |
 | `snappie/convert_dialog.py` | the convert window (also the video editor's export) |

@@ -39,6 +39,9 @@ DEFAULTS = {
     "rec.quality": "good",                # high | good | small
     "rec.fps": 0,                         # 0 = native / variable
     "rec.audio": True,                    # desktop audio
+    "rec.audio_apps": "all",              # all | only | except: which apps' sound rec.audio records
+    "rec.audio_app_list": [],             # app names for only / except (app, binary or Flatpak id)
+    "rec.audio_ask": True,                # ask which apps (and the mic) before recording
     "rec.mic": False,
     "cursor": True,                       # record the cursor (key kept from older versions)
     "rec.container": "mp4",               # mp4 | mkv | webm (always recorded as MKV, then remuxed)

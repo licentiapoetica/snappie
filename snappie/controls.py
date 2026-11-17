@@ -1,8 +1,9 @@
 """Small floating recording bar (timer, pause, draw, stop). KWin places it, see kwin.place."""
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
-from PyQt6.QtWidgets import QButtonGroup, QColorDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap, QPolygonF
+from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QColorDialog, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
+                             QVBoxLayout, QWidget)
 
 from .style import ACCENT_TEXT, MUTED, PALETTE, RECORD, TEXT, mark_overlay
 
@@ -66,6 +67,37 @@ def _tool_icon(kind, color):
         p.drawEllipse(QRectF(2.5, 4, 13, 10))
     p.end()
     return pm
+
+
+def _mic_icon(color, muted=False):
+    """Microphone line art; crossed out when muted."""
+    pm = QPixmap(36, 36)
+    pm.setDevicePixelRatio(2)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(QPen(color, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    p.drawRoundedRect(QRectF(6.5, 2, 5, 9), 2.5, 2.5)
+    path = QPainterPath(QPointF(4, 8.5))
+    path.arcTo(QRectF(4, 4.5, 10, 9), 180, 180)
+    p.drawPath(path)
+    p.drawLine(QPointF(9, 13.5), QPointF(9, 16))
+    p.drawLine(QPointF(6.5, 16), QPointF(11.5, 16))
+    if muted:
+        p.setPen(QPen(RECORD, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawLine(QPointF(3, 3), QPointF(15, 15))
+    p.end()
+    return pm
+
+
+def _dark(widget):
+    """The bar's colors for normal widgets (checkboxes) on its black background."""
+    pal = widget.palette()
+    for role, color in ((QPalette.ColorRole.Window, "#000000"), (QPalette.ColorRole.WindowText, "#eff0f1"),
+                        (QPalette.ColorRole.Base, "#232629"), (QPalette.ColorRole.Text, "#eff0f1"),
+                        (QPalette.ColorRole.Button, "#31363b"), (QPalette.ColorRole.ButtonText, "#eff0f1")):
+        pal.setColor(role, QColor(color))
+    widget.setPalette(pal)
 
 
 def _sep():
@@ -252,7 +284,21 @@ class Controls(QWidget):
         self.draw.setToolTip("Draw on the recording  (snappie draw)\n"
                              "1–8 colors · wheel width · Shift arrow · R box · Z undo · C clear · Esc done")
         self.draw.toggled.connect(self.draw_toggled)
-        for b in (self.pause, self.draw):
+        self.audio = QPushButton("♪")
+        self.audio.setToolTip("Which apps' sound is recorded (changes apply right away)")
+        self.audio.clicked.connect(self._audio_menu)
+        self.audio.hide()
+        self._audio_items = self._audio_set = None
+        self.mic = QPushButton()
+        self.mic.setCheckable(True)
+        self.mic.setToolTip("Microphone on / off")
+        ic = QIcon()
+        ic.addPixmap(_mic_icon(QColor("#9aa0a6"), muted=True), QIcon.Mode.Normal, QIcon.State.Off)
+        ic.addPixmap(_mic_icon(ACCENT_TEXT), QIcon.Mode.Normal, QIcon.State.On)
+        self.mic.setIcon(ic)
+        self.mic.setIconSize(QSize(18, 18))
+        self.mic.hide()
+        for b in (self.pause, self.draw, self.audio, self.mic):
             b.setStyleSheet(_BTN)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -278,6 +324,8 @@ class Controls(QWidget):
         lay.addSpacing(4)
         lay.addWidget(self.pause)
         lay.addWidget(self.draw)
+        lay.addWidget(self.audio)
+        lay.addWidget(self.mic)
         self.tools = DrawTools()
         self.tools.hide()
         lay.addWidget(self.tools)
@@ -315,6 +363,30 @@ class Controls(QWidget):
         self.adjustSize()
         self.setFixedSize(self.sizeHint())
 
+    def set_audio_menu(self, items, set_app, mic, set_mic):
+        """items() -> [(app name, recorded?)]; set_app(name, on) when one is ticked.
+        mic: whether the microphone starts on; set_mic(on) when it's toggled."""
+        self._audio_items, self._audio_set = items, set_app
+        self.audio.show()
+        self.mic.setChecked(mic)
+        self.mic.toggled.connect(set_mic)
+        self.mic.show()
+        self.adjustSize()
+        self.setFixedSize(self.sizeHint())
+
+    def _audio_menu(self):
+        menu = QMenu(self)
+        items = self._audio_items()
+        if not items:
+            menu.addAction("No app is playing sound").setEnabled(False)
+        for name, on in items:
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(on)
+            act.toggled.connect(lambda checked, n=name: self._audio_set(n, checked))
+        menu.aboutToHide.connect(menu.deleteLater)
+        menu.popup(self.audio.mapToGlobal(self.audio.rect().bottomLeft()))
+
     def set_busy(self, busy):
         """While a segment is being finished/started (pause, resume): no double clicks."""
         self.pause.setEnabled(not busy)
@@ -323,6 +395,8 @@ class Controls(QWidget):
         self.stop.setEnabled(False)
         self.pause.setEnabled(False)
         self.draw.setEnabled(False)
+        self.audio.setEnabled(False)
+        self.mic.setEnabled(False)
         self.tools.setEnabled(False)
         self.stop.setText("…")
         self._blink.stop()
@@ -339,5 +413,90 @@ class Controls(QWidget):
 
     def mousePressEvent(self, ev):
         # drag the bar anywhere (Wayland: the compositor moves it); KWin then stops auto-placing it
+        if ev.button() == Qt.MouseButton.LeftButton and self.windowHandle():
+            self.windowHandle().startSystemMove()
+
+
+class SoundChooser(QWidget):
+    """Asked before a recording starts: which apps it hears, and the microphone.  Placed under
+    the area like the recording bar, and gone before the first frame."""
+    TITLE = "Snappie — sound"
+    accepted = pyqtSignal(dict, bool)   # {app name: on}, mic
+    cancelled = pyqtSignal()
+
+    def __init__(self, items, mic):
+        """items: [(app name, on)] for the apps playing now."""
+        super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        mark_overlay(self)
+        self.setWindowTitle(self.TITLE)
+        _dark(self)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 10, 10)
+        lay.setSpacing(6)
+        title = QLabel("Record sound from")
+        f = title.font()
+        f.setBold(True)
+        title.setFont(f)
+        lay.addWidget(title)
+        self.boxes = {}
+        for name, on in items:
+            cb = QCheckBox(name)
+            cb.setChecked(on)
+            self.boxes[name] = cb
+            lay.addWidget(cb)
+        if not items:
+            note = QLabel("No app is playing sound right now.\nApps that start later follow the settings.")
+            note.setStyleSheet("color: #9aa0a6;")
+            lay.addWidget(note)
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background: rgba(255,255,255,45);")
+        lay.addWidget(line)
+        self.mic = QCheckBox("My microphone")
+        self.mic.setIcon(QIcon(_mic_icon(QColor("#eff0f1"))))
+        self.mic.setChecked(mic)
+        lay.addWidget(self.mic)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setStyleSheet(_BTN)
+        cancel.clicked.connect(self._cancel)
+        record = QPushButton("● Record")
+        record.setStyleSheet(
+            "QPushButton { background: #da4453; color: white; border: none; border-radius: 0;"
+            " padding: 4px 12px; font-weight: bold; } QPushButton:hover { background: #e5606d; }")
+        record.clicked.connect(self._accept)
+        record.setDefault(True)
+        for b in (cancel, record):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            row.addWidget(b)
+        lay.addLayout(row)
+        record.setFocus()
+        self._done = False
+        self.adjustSize()
+        self.setFixedSize(self.sizeHint())
+
+    def _accept(self):
+        if not self._done:
+            self._done = True
+            self.accepted.emit({n: cb.isChecked() for n, cb in self.boxes.items()}, self.mic.isChecked())
+
+    def _cancel(self):
+        if not self._done:
+            self._done = True
+            self.cancelled.emit()
+
+    def keyPressEvent(self, ev):
+        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._accept()
+        elif ev.key() == Qt.Key.Key_Escape:
+            self._cancel()
+        else:
+            super().keyPressEvent(ev)
+
+    def paintEvent(self, _):
+        QPainter(self).fillRect(self.rect(), QColor(0, 0, 0))
+
+    def mousePressEvent(self, ev):
         if ev.button() == Qt.MouseButton.LeftButton and self.windowHandle():
             self.windowHandle().startSystemMove()

@@ -101,6 +101,7 @@ function adopt(w) {
         ctl.interactiveMoveResizeStarted.connect(function () { manual = true; });
     ctl.frameGeometryChanged.connect(function () { if (!placing && !manual) place(); });
     place();
+    if (opts.activate) workspace.activeWindow = ctl;   // takes the keyboard (Enter / Esc)
 }
 var all = workspace.windowList();
 for (var i = 0; i < all.length; i++) {

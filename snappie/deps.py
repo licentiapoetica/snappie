@@ -74,6 +74,8 @@ DEPS = [
         feature="text recognition (OCR)"),
     Dep("evdev", "python-evdev", "python", ["evdev"], _p("python-evdev", "python3-evdev", "python3-evdev"),
         feature="showing clicks and keys in recordings"),
+    Dep("pw-tools", "PipeWire tools", "cmd", ["pw-cli", "pw-dump", "pw-link"],
+        _p("pipewire", "pipewire-tools", "pipewire-bin"), feature="recording only some apps' sound"),
     Dep("openssh", "OpenSSH client", "cmd", ["ssh", "sftp"],
         _p("openssh", "openssh-clients", "openssh-client"), feature="SFTP uploads"),
     # building the Share menu plugin (snappie/purpose/, share_plugin.py)

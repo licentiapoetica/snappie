@@ -1176,7 +1176,11 @@ class App(QObject):
             "codec": ns.codec or settings.get("rec.codec"),
             "quality": ns.quality or ("high" if anim else settings.get("rec.quality")),
             "qp": ns.qp, "fps": ns.fps or settings.get("rec.fps") or None,
-            "audio": not ns.no_audio and settings.get("rec.audio"),
+            "audio": not ns.no_audio and (settings.get("rec.audio") or bool(ns.app or ns.exclude_app)),
+            "apps": _audio_apps(ns),
+            # ask which apps (and the mic) unless the command line already says, or nobody's there to answer
+            "ask_audio": settings.get("rec.audio_ask") and not (ns.app or ns.exclude_app or ns.no_audio
+                                                                or ns.duration),
             "mic": ns.mic or settings.get("rec.mic"),
             "container": ns.container or ("mkv" if ns.mkv else settings.get("rec.container")),
             "anim": anim, "duration": ns.duration, "output": ns.output, "delay": ns.delay,
@@ -1247,6 +1251,16 @@ class App(QObject):
             self.notifier.notify("Recording failed", error, icon="dialog-error")
             self.exit_code = 1
         self.idle_check()
+
+
+def _audio_apps(ns):
+    """(mode, names) for the desktop audio: ("all", []) | ("only", [...]) | ("except", [...])."""
+    if getattr(ns, "app", None):
+        return "only", ns.app
+    if getattr(ns, "exclude_app", None):
+        return "except", ns.exclude_app
+    mode = settings.get("rec.audio_apps")
+    return (mode if mode in ("only", "except") else "all"), list(settings.get("rec.audio_app_list") or [])
 
 
 # ---------------------------------------------------------------------- desktop helpers
