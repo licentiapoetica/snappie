@@ -1,14 +1,13 @@
 import os
 
 import pytest
-from PyQt6.QtGui import QColor, QGuiApplication, QImage
+from PyQt6.QtGui import QColor, QImage
 
 from snappie import history, settings
 
 
 @pytest.fixture
-def data(tmp_path, monkeypatch):
-    QGuiApplication.instance() or QGuiApplication([])
+def data(tmp_path, monkeypatch, qapp):
     monkeypatch.setattr(settings, "HISTORY_FILE", str(tmp_path / "history.jsonl"))
     monkeypatch.setattr(settings, "THUMBS_DIR", str(tmp_path / "thumbs"))
     monkeypatch.setattr(settings, "CLIPBOARD_DIR", str(tmp_path / "clipboard"))

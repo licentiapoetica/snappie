@@ -4,7 +4,7 @@ from PyQt6.QtCore import QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
-from .style import ACCENT, MUTED, PANEL_BG, TEXT
+from .style import ACCENT, MUTED, PANEL_BG, TEXT, never_blocked
 
 
 class Countdown(QWidget):
@@ -17,6 +17,7 @@ class Countdown(QWidget):
     def __init__(self, seconds):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
                          | Qt.WindowType.WindowDoesNotAcceptFocus)
+        never_blocked(self)
         self.setWindowTitle(self.TITLE)
         self.left = max(1, int(round(seconds)))
         self.setFixedSize(150, 150)
@@ -78,6 +79,7 @@ class ScrollBarOsd(QWidget):
     def __init__(self):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
                          | Qt.WindowType.WindowDoesNotAcceptFocus)
+        never_blocked(self)
         self.setWindowTitle(self.TITLE)
         self.label = QLabel("Scrolling capture…")
         self.label.setStyleSheet("color: #eff0f1; font-weight: bold;")

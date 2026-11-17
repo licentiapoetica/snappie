@@ -190,6 +190,7 @@ class LiveOverlay(QWidget):
         self._base_flags = (Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.NoDropShadowWindowHint)
         self.setWindowFlags(self._flags(False))
+        style.never_blocked(self)
         self.setWindowTitle(TITLE)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)

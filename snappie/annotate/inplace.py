@@ -38,6 +38,7 @@ class InPlaceEditor(QWidget):
 
     def __init__(self, screen, background, rect, windows=None):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        style.never_blocked(self)
         self.scr = screen
         self.setWindowTitle(self.TITLE)
         self.setMouseTracking(True)

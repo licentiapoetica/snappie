@@ -18,7 +18,7 @@ from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, pyqt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QRegion
 from PyQt6.QtWidgets import QWidget
 
-from .style import ACCENT, ACCENT_TEXT, CHIP_BG, CHIP_HOVER, DIM, MUTED, PANEL_BG, TEXT, WARN
+from .style import ACCENT, ACCENT_TEXT, CHIP_BG, CHIP_HOVER, DIM, MUTED, PANEL_BG, TEXT, WARN, never_blocked
 
 # what the picker is for: changes the hints, toggles and what a click returns
 MODES = {
@@ -522,6 +522,7 @@ class Overlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
+        never_blocked(self)
         self.setWindowTitle(self.TITLE)
         self.f_text = QFont(self.font())
         self.f_text.setPointSizeF(self.font().pointSizeF() + 0.5)
