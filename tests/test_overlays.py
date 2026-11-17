@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDialog, QWidget
 
@@ -68,6 +68,9 @@ class NoTree:
     def has_tree(self, w):
         return True   # no window grabs in the background
 
+    def chain_at(self, w, x, y):
+        return []
+
 
 def window(wid, pid, caption):
     return {"id": wid, "pid": pid, "caption": caption, "cls": "x", "visible": True, "normal": True,
@@ -128,3 +131,38 @@ def test_suspended_effects_come_back(monkeypatch):
     k.resume_effect("dialogparent")
     k.resume_effect("blur")
     assert bus.calls == [("unload", "dialogparent"), ("load", "dialogparent")]
+
+
+def picked(pk):
+    got = []
+    pk.finished.connect(got.append)
+    return got
+
+
+def test_middle_click_records_the_highlighted_area(qapp):
+    pk = Picker([window("a", 1, "Firefox")], NoTree(), own_pid=42, mode="shot")
+    pk.can_record = True
+    got = picked(pk)
+    pk.mouse_press(QPoint(50, 50), Qt.MouseButton.MiddleButton)
+    assert len(got) == 1 and got[0].record and got[0].kind == "window" and got[0].win["id"] == "a"
+
+
+def test_middle_click_while_dragging_records_the_rectangle(qapp):
+    pk = Picker([window("a", 1, "Firefox")], NoTree(), own_pid=42, mode="shot")
+    pk.can_record = True
+    got = picked(pk)
+    pk.mouse_press(QPoint(10, 10), Qt.MouseButton.LeftButton)
+    pk.mouse_move(QPoint(60, 40))
+    pk.mouse_press(QPoint(60, 40), Qt.MouseButton.MiddleButton)
+    assert len(got) == 1 and got[0].record and got[0].kind == "region"
+    assert got[0].rect == QRect(QPoint(10, 10), QPoint(60, 40)) and got[0].win["id"] == "a"
+
+
+def test_middle_click_does_nothing_without_the_record_shortcut(qapp):
+    pk = Picker([window("a", 1, "Firefox")], NoTree(), own_pid=42, mode="shot")
+    got = picked(pk)
+    try:
+        pk.mouse_press(QPoint(50, 50), Qt.MouseButton.MiddleButton)
+        assert got == []
+    finally:
+        pk._finish(None)

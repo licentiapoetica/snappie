@@ -432,7 +432,7 @@ class App(QObject):
         else:
             try:
                 if sel.front:
-                    self._bring_front(sel.front, pk.mode if pk else None)
+                    self._bring_front(sel.front, "record" if sel.record else pk.mode if pk else None)
                 on_pick(sel)
             except Exception as e:
                 log("error:", e)
@@ -520,6 +520,8 @@ class App(QObject):
         try:
             if not (screen or window or last):
                 self.pick(mode="shot", on_pick=lambda sel: self._shot_picked(sel, opts))
+                if self.picker:
+                    self.picker.can_record = not self.recording
                 return
             pointer = cast.POINTER_EMBEDDED if settings.get("shot.cursor") else cast.POINTER_HIDDEN
             self._undim()
@@ -573,6 +575,10 @@ class App(QObject):
         return img
 
     def _shot_picked(self, sel, opts, remember=True):
+        if sel.record:  # middle click in the picker: record this area instead
+            sel.show_cursor = settings.get("cursor")  # the screenshot picker has no cursor toggle
+            self.record(cli.parse(["record"]), sel=sel)
+            return
         if remember:
             self.remember_selection(sel)
         then = opts.get("then")
@@ -595,6 +601,7 @@ class App(QObject):
                       if w.get("visible") and (w.get("normal") or w.get("dialog"))]
             self.kwin.skip_taskbar(InPlaceEditor.TITLE)  # full screen too
             ed = InPlaceEditor(scr, bg, sel.rect.intersected(scr.geometry()), frames)
+            ed.can_record = not self.recording
             self.keep(ed)
             ed.action.connect(lambda name, doc: self._doc_action(name, doc, ed, inplace=True))
             ed.present()
@@ -615,6 +622,14 @@ class App(QObject):
             self._close_inplace(editor)
             self.open_editor(doc=doc)
             return
+        if name == "record":  # middle click in the in-place editor: record its area, live
+            from .picker import Selection
+            rect = editor.selection_rect()
+            sel = Selection(rect, self._window_around(rect), "Region", "region")
+            sel.show_cursor = settings.get("cursor")
+            self._close_inplace(editor)
+            self.record(cli.parse(["record"]), sel=sel)
+            return
         img = doc.render()
         origin = getattr(editor, "selection_origin", lambda: None)() if inplace else None
         actions = settings.get("shot.after") if name == "confirm" else [name]
@@ -629,6 +644,20 @@ class App(QObject):
             editor.mark_saved(path)
         if inplace:
             self._close_inplace(editor)
+
+    def _window_around(self, rect):
+        """The window under rect if rect lies inside it (recorded through its own stream), like a
+        drag in the picker; None records the screen area."""
+        from .picker import _base_caption
+        overlays = style.overlay_titles()
+        for w in reversed(getattr(self, "_pick_windows", [])):  # topmost first
+            if not (w.get("visible") and (w.get("normal") or w.get("dialog") or w.get("dock"))) \
+                    or (w["pid"] == os.getpid() and _base_caption(w["caption"]) in overlays):
+                continue
+            frame = QRect(*w["frame"])
+            if frame.contains(rect.topLeft()):
+                return w if frame.contains(rect) and not w.get("dock") else None
+        return None
 
     def _close_inplace(self, ed):
         ed.hide()
@@ -1131,7 +1160,10 @@ class App(QObject):
 
     # ------------------------------------------------------------------ recording
 
-    def record(self, ns):
+    def record(self, ns, sel=None):
+        """sel: record this area right away (picked by the screenshot picker) instead of picking one."""
+        if self.recording and sel is not None:
+            return
         if self.recording:
             self.recording.stop()
             return
@@ -1164,6 +1196,9 @@ class App(QObject):
             self.recording.start()
 
         from .recording import Recording
+        if sel is not None:
+            start(sel)
+            return
         if ns.last:
             sel = self.restore_selection()
             sel.show_cursor = settings.get("cursor") if cursor is None else cursor
