@@ -77,7 +77,7 @@ To register the launcher and global shortcut actions for this installation:
 .venv/bin/python -c 'from snappie import hotkeys; hotkeys.install()'
 ```
 
-Start `.venv/bin/snappie` and enable **Start with Plasma** in the tray menu if desired.
+Start `.venv/bin/snappie` and turn on **Start Snappie with Plasma** in Settings → Hotkeys if desired.
 Keep the virtual environment at its installed path; the desktop entries point to it.
 You can remove the source checkout after installation if the virtual environment
 is stored elsewhere. `install.sh` remains the checkout-based alternative.
@@ -92,7 +92,7 @@ Builds do not register desktop entries or write to your user data directory.
 
 `snappie` runs in the tray. Click: screenshot. Middle click: record. Right
 click: everything else (delays, last area, GIF, OCR, color picker, scrolling
-capture, history, settings, start with Plasma).
+capture, history, settings). Starting with Plasma is set in Settings → Hotkeys.
 
 Every action is also a command, and a global shortcut you can assign in
 **System Settings → Shortcuts → snappie** (none are set by default):
@@ -171,7 +171,8 @@ corners, shadow).
 Copy, save (`~/Pictures/Snappie`), upload, pin to the screen (always on top;
 wheel zooms), and OCR. Pick the defaults in Settings. Every capture lands in the
 **history**, which shows thumbnails and lets you open, copy, upload, edit, pin
-or delete.
+or delete. That includes screenshots you only copied: Snappie keeps a copy in
+`~/.local/share/snappie/clipboard/` and removes it when the history entry goes.
 
 **Uploads** use ShareX custom uploaders: import any `.sxcu` file (Zipline,
 XBackBone, catbox, …) in Settings → Uploads. The link is copied when done.

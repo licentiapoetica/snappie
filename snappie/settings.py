@@ -16,6 +16,7 @@ SETTINGS = os.path.join(CONFIG_DIR, "settings.json")
 UPLOADERS_DIR = os.path.join(CONFIG_DIR, "uploaders")    # imported ShareX .sxcu files
 HISTORY_FILE = os.path.join(DATA_DIR, "history.jsonl")
 THUMBS_DIR = os.path.join(DATA_DIR, "thumbs")
+CLIPBOARD_DIR = os.path.join(DATA_DIR, "clipboard")   # copy-only screenshots, kept for the history
 
 DEFAULTS = {
     # -- screenshots --

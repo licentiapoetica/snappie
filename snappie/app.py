@@ -316,9 +316,6 @@ class App(QObject):
         menu.addSeparator()
         add("History", ["history"], "view-history")
         add("Settings", ["settings"], "configure")
-        auto = QAction("Start with Plasma", menu, checkable=True, checked=_autostart_enabled())
-        auto.toggled.connect(_set_autostart)
-        menu.addAction(auto)
         if self.daemon:
             add("Quit", ["quit"], "application-exit")
         self.tray.setContextMenu(menu)
@@ -644,6 +641,8 @@ class App(QObject):
                 history.add("image", path, width=img.width(), height=img.height())
                 if "save" in actions or output:
                     done.append("saved")
+        if "copy" in actions and not path:
+            history.add_copied(img)    # not saved anywhere: keep it for the history
         if "pin" in actions:
             self.pin(img, origin)
         if "edit" in actions:

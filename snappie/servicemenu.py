@@ -19,19 +19,20 @@ IMAGES = ["image/png", "image/jpeg", "image/webp", "image/bmp", "image/gif", "im
 VIDEOS = ["video/mp4", "video/x-matroska", "video/webm", "video/quicktime", "video/x-msvideo", "video/mpeg"]
 
 # file name -> (mime types, [(action id, label, icon, command line arguments)])
-# %F: all selected files in one call; %f: one call per file
+# %F: all selected files in one call; %f: one call per file.  Dolphin sorts a submenu by action id,
+# not by file order, so the ids start with their position: Upload first.
 MENUS = {
     "upload": (["all/allfiles"], [
-        ("upload", "Upload", "cloud-upload", ["upload", "%F"]),
+        ("a-upload", "Upload", "cloud-upload", ["upload", "%F"]),
     ]),
     "image": (IMAGES, [
-        ("edit", "Annotate", "edit-image", ["edit", "%f"]),
-        ("pin", "Pin to Screen", "window-pin", ["pin", "%f"]),
-        ("ocr", "Copy Text (OCR)", "edit-select-text", ["ocr", "%f"]),
+        ("b-edit", "Annotate", "edit-image", ["edit", "%f"]),
+        ("c-ocr", "Copy Text (OCR)", "edit-select-text", ["ocr", "%f"]),
+        ("d-pin", "Pin to Screen", "window-pin", ["pin", "%f"]),
     ]),
     "video": (VIDEOS, [
-        ("gif", "Convert to GIF", "image-gif", ["convert", "--gif", "%f"]),
-        ("webp", "Convert to WebP", "viewimage", ["convert", "--webp", "%f"]),
+        ("e-gif", "Convert to GIF", "image-gif", ["convert", "--gif", "%f"]),
+        ("f-webp", "Convert to WebP", "viewimage", ["convert", "--webp", "%f"]),
     ]),
 }
 

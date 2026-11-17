@@ -233,8 +233,11 @@ class SettingsDialog(QDialog):
 
     def load(self, source=None):
         """Fill the widgets from the stored settings, or from `source` (a dict like DEFAULTS)."""
+        from .app import _autostart_enabled
         for key, (_, put) in self._fields.items():
             put(source[key] if source is not None else settings.get(key))
+        # not a setting: an autostart entry (on by default, install.sh adds it)
+        self.autostart.setChecked(True if source is not None else _autostart_enabled())
         if source is None:   # restoring defaults keeps the chosen uploader
             self._default_uploader = settings.get("upload.uploader") or ""
         self._refresh_uploaders()
@@ -245,9 +248,15 @@ class SettingsDialog(QDialog):
         return out
 
     def apply(self):
+        from .app import _autostart_enabled, _set_autostart
         changes = {k: v for k, v in self.values().items() if v != settings.get(k)}
         if changes:
             settings.save(**changes)
+        if self.autostart.isChecked() != _autostart_enabled():
+            try:
+                _set_autostart(self.autostart.isChecked())
+            except OSError as e:
+                QMessageBox.warning(self, "Start with Plasma", f"Couldn't change the autostart entry: {e}")
         return changes
 
     def accept(self):
@@ -477,6 +486,8 @@ class SettingsDialog(QDialog):
         v = QVBoxLayout(page)
         from . import share_plugin
         box, form = _form("KDE integration")
+        self.autostart = QCheckBox("Start Snappie with Plasma (in the system tray)")
+        form.addRow(self.autostart)
         form.addRow(self._bind("dolphin_menu", QCheckBox(
             "Snappie in Dolphin's right-click menu (upload, annotate, pin, OCR, convert to GIF)")))
         form.addRow(self._bind("share_menu", QCheckBox(
