@@ -15,7 +15,8 @@ from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog,
                              QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
                              QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-                             QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTableWidget,
+                             QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSlider, QSpinBox,
+                             QTableWidget,
                              QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
 from . import ocr, settings, style, upload
@@ -194,6 +195,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(_scroll(self._recording()), QIcon.fromTheme("media-record"), "Recording")
         self.tabs.addTab(_scroll(self._gif()), QIcon.fromTheme("image-gif"), "GIF")
         self.tabs.addTab(self._uploads(), QIcon.fromTheme("cloud-upload"), "Uploads")
+        self.tabs.addTab(_scroll(self._sounds()), QIcon.fromTheme("preferences-desktop-sound"), "Sounds")
         self.tabs.addTab(self._hotkeys(), QIcon.fromTheme("preferences-desktop-keyboard"), "Hotkeys")
         self.tabs.addTab(_scroll(self._annotation()), QIcon.fromTheme("draw-freehand"), "Annotation")
 
@@ -419,6 +421,56 @@ class SettingsDialog(QDialog):
                           "you can also export them from ShareX on Windows."))
         self._uploader = None
         return page
+
+    def _sounds(self):
+        from . import sound
+        page = QWidget()
+        v = QVBoxLayout(page)
+        box = QGroupBox("Play a sound when")
+        grid = QGridLayout(box)
+        grid.setColumnStretch(1, 1)
+        for row, (event, (label, names)) in enumerate(sound.EVENTS.items()):
+            check = self._bind(f"sound.{event}", QCheckBox(label))
+            path = self._bind(f"sound.{event}.file", QLineEdit())
+            default = sound.theme_file(names)
+            path.setPlaceholderText(f"System sound: {os.path.splitext(os.path.basename(default))[0]}"
+                                    if default else "No system sound found: choose a file")
+            path.setClearButtonEnabled(True)
+            browse = QToolButton()
+            browse.setIcon(QIcon.fromTheme("document-open"))
+            browse.setToolTip("Choose a sound file")
+            browse.clicked.connect(lambda _=False, e=path: self._pick_sound(e))
+            test = QToolButton()
+            test.setIcon(QIcon.fromTheme("media-playback-start"))
+            test.setToolTip("Play")
+            test.clicked.connect(lambda _=False, e=event, f=path: self._test_sound(e, f.text().strip()))
+            path.setEnabled(check.isChecked())
+            check.toggled.connect(path.setEnabled)
+            for col, w in enumerate((check, path, browse, test)):
+                grid.addWidget(w, row, col)
+        v.addWidget(box)
+        box, form = _form()
+        self.sound_volume = self._bind("sound.volume", QSlider(Qt.Orientation.Horizontal))
+        self.sound_volume.setRange(0, 100)
+        form.addRow("Volume:", self.sound_volume)
+        v.addWidget(box)
+        v.addWidget(_hint("Empty means the sound from your sound theme (System Settings → Sounds). "
+                          "The recording starts after its sound has played, so the sound isn't recorded."))
+        v.addStretch(1)
+        return page
+
+    def _pick_sound(self, edit):
+        start = os.path.dirname(edit.text()) if edit.text() else "/usr/share/sounds"
+        path, _ = QFileDialog.getOpenFileName(self, "Choose a sound", start,
+                                              "Sounds (*.oga *.ogg *.opus *.wav *.flac *.mp3);;All files (*)")
+        if path:
+            edit.setText(path)
+
+    def _test_sound(self, event, custom):
+        from . import sound
+        path = sound.file_for(event, custom)
+        if not path or not sound.play_file(path, self.sound_volume.value()):
+            QMessageBox.warning(self, "Sound", "This sound can't be played." if path else "No sound file found.")
 
     def _hotkeys(self):
         page = QWidget()

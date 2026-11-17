@@ -55,6 +55,13 @@ DEFAULTS = {
     "gif.max_width": 960,                 # 0 = keep the native width
 
     "dolphin_menu": True,                 # Snappie submenu in Dolphin's right-click menu
+    # -- sounds -- (sound.<event>.file: "" = the sound theme's sound; see sound.EVENTS)
+    "sound.volume": 70,
+    "sound.shot": False, "sound.shot.file": "",
+    "sound.record_start": False, "sound.record_start.file": "",
+    "sound.record_stop": False, "sound.record_stop.file": "",
+    "sound.upload": False, "sound.upload.file": "",
+    "sound.error": False, "sound.error.file": "",
     # -- uploads --
     "upload.uploader": "",                # file name in UPLOADERS_DIR, "" = none chosen
     "upload.copy_url": True,              # copy the URL after uploading

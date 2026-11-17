@@ -170,6 +170,11 @@ copied. While uploading, the tray icon shows the progress, and Plasma shows it
 in its notifications with speed, time left and a Cancel button. You can also
 cancel from the tray menu.
 
+**Sounds** for a screenshot, the start and end of a recording, a finished
+upload, or an error can be turned on in Settings → Sounds. They come from your
+sound theme, or pick your own files. The start sound plays before the recording
+begins, so it isn't recorded.
+
 ## Recording
 
 While recording, a small bar sits under the area: timer, pause, draw, stop.

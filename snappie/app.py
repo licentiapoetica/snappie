@@ -119,8 +119,10 @@ class App(QObject):
                 self.quit()
                 return
         except Exception as e:
+            from . import sound
             log("error:", e)
             self.notifier.notify("Snappie", str(e), icon="dialog-error")
+            sound.play("error")
         self.idle_check()
 
     # ------------------------------------------------------------------ lifetime
@@ -159,6 +161,10 @@ class App(QObject):
         if self._busy():
             if not (self.picker or self.recording or self.windows or self.jobs or self.uploading):
                 self._idle.start(10_000)  # only the clipboard keeps us: check now and then
+            return
+        from . import sound
+        if sound.playing():
+            self._idle.start(300)          # let the last sound finish
             return
         self.quit()
 
@@ -506,6 +512,8 @@ class App(QObject):
         return img
 
     def _shot_picked(self, sel, opts, remember=True):
+        from . import sound
+        sound.play("shot")
         if remember:
             self.remember_selection(sel)
         then = opts.get("then")
@@ -779,9 +787,13 @@ class App(QObject):
                         else "video", job.path, url=job.result.url, delete_url=job.result.delete_url)
 
     def _uploads_done(self, jobs, cancelled):
-        from . import upload
+        from . import sound, upload
         ok = [j for j in jobs if j.result is not None]
         failed = [j for j in jobs if j.result is None and not isinstance(j.exception, upload.Cancelled)]
+        if failed:
+            sound.play("error")
+        elif ok:
+            sound.play("upload")
         copy = settings.get("upload.copy_url")
         urls = [j.result.url for j in ok]
         if copy and urls:
@@ -991,7 +1003,9 @@ class App(QObject):
             self.quit()
 
     def _recording_ended(self, path, error):
-        from . import history
+        from . import history, sound
+        if path or error:
+            sound.play("error" if error else "record_stop")
         rec, self.recording = self.recording, None
         self._tray_state = None
         if not self._drop_oneshot_tray():

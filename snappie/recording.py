@@ -43,8 +43,14 @@ class Recording:
     # -- start --
 
     def start(self):
-        # give KWin a moment to remove the picker overlays before the first frame
-        GLib.timeout_add(max(300, int(self.opts.get("delay", 0) * 1000)), self._open_stream)
+        # give KWin a moment to remove the picker overlays before the first frame; the start
+        # sound plays before the stream opens, so the desktop audio doesn't record it
+        from . import sound
+
+        def go():
+            sound.play("record_start", then=lambda: None if self._ended else self._open_stream())
+            return False
+        GLib.timeout_add(max(300, int(self.opts.get("delay", 0) * 1000)), go)
 
     def _open_stream(self):
         from PyQt6.QtGui import QGuiApplication
