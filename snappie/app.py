@@ -118,7 +118,7 @@ class App(QObject):
             elif c == "upload":
                 self.upload([os.path.abspath(f) for f in ns.files], ns.uploader)
             elif c == "convert":
-                self.convert(os.path.abspath(ns.file), "webp" if ns.webp else "gif")
+                self.convert(ns)
             elif c == "quit":
                 self.quit()
                 return
@@ -696,13 +696,36 @@ class App(QObject):
     # ------------------------------------------------------------------ editor, pins, history
 
     def open_editor(self, doc=None, image=None, path=None):
+        from . import convert
         from .annotate import Document, EditorWindow
+        if doc is None and image is None and path and path.lower().endswith(convert.VIDEO_EXTS):
+            return self.open_video_editor(path)
         if doc is None and image is None and path:
             win = EditorWindow.open_file(path)
         else:
             win = EditorWindow(doc or Document(image), path)
         self.keep(win)
         win.action.connect(lambda name, d: self._doc_action(name, d, win))
+        win.show()
+        win.raise_()
+        win.activateWindow()
+        return win
+
+    def open_video_editor(self, path):
+        """Cut and crop a video; Export opens the convert window with the edit."""
+        from . import convert
+        from .videoedit import VideoEditor
+        if not self._can_convert():
+            return None
+        try:
+            info = convert.probe(path)
+            win = VideoEditor(info)
+        except RuntimeError as e:
+            self.notifier.notify("Can't open this video", str(e), icon="dialog-error")
+            return None
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        win.export.connect(lambda segments, crop: self.open_convert(path, info, segments, crop))
+        self.keep(win)
         win.show()
         win.raise_()
         win.activateWindow()
@@ -764,6 +787,8 @@ class App(QObject):
             self.upload(path)
         elif name == "edit" and path:
             self.open_editor(path=path)
+        elif name == "convert" and path:
+            self.open_convert(path)
         elif name == "pin" and path:
             from PyQt6.QtGui import QImage
             self.pin(QImage(path))
@@ -946,44 +971,108 @@ class App(QObject):
         job.start(img)
         self._ocrs = getattr(self, "_ocrs", set()) | {job}
 
-    def convert(self, video, fmt):
-        """Video file → animated GIF / WebP next to it, in a thread (ffmpeg takes a while)."""
-        import shutil
-        import threading
-        from . import deps, history
-        from .recorder import to_animation
-        if not shutil.which("ffmpeg"):
-            self.notifier.notify("Converting needs ffmpeg", deps.install_hint(["ffmpeg"]),
-                                 icon="dialog-information")
+    def convert(self, ns):
+        """`snappie convert`: with a format, convert right away (saved defaults + the options given);
+        without one, open the convert window."""
+        from . import convert
+        path = os.path.abspath(ns.file)
+        if not self._can_convert():
             return
-        if not os.path.isfile(video):
-            raise RuntimeError(f"Not a file: {video}")
-        base = os.path.splitext(video)[0]
-        out, n = f"{base}.{fmt}", 1
-        while os.path.exists(out):
-            out, n = f"{base}-{n}.{fmt}", n + 1
+        if not os.path.isfile(path):
+            raise RuntimeError(f"Not a file: {path}")
+        if not ns.to:
+            self.open_convert(path)
+            return
+        opts = convert.Options.defaults(ns.to)
+        for key in ("fps", "width", "quality", "background"):
+            if getattr(ns, key) is not None:
+                setattr(opts, key, getattr(ns, key))
+        opts.segments = convert.segments_from(ns.start, ns.end, ns.cut)
+        opts.crop = None if ns.crop == "auto" else ns.crop
+        opts.speed, opts.repeat = ns.speed, ns.repeat
+        opts.audio, opts.copy = not ns.no_audio, not ns.reencode
+        self.run_conversion(path, opts, os.path.abspath(ns.output) if ns.output else None,
+                            auto_crop=ns.crop == "auto")
+
+    def _can_convert(self):
+        from . import convert, deps
+        if convert.available():
+            return True
+        self.notifier.notify("Converting needs ffmpeg", deps.install_hint(["ffmpeg"]), icon="dialog-information")
+        return False
+
+    def open_convert(self, path, info=None, segments=None, crop=None):
+        """The convert window (also the video editor's Export, with its cuts and crop)."""
+        from . import convert
+        from .convert_dialog import ConvertDialog
+        if not self._can_convert():
+            return None
+        try:
+            info = info or convert.probe(path)
+        except RuntimeError as e:
+            self.notifier.notify("Can't convert this file", str(e), icon="dialog-error")
+            return None
+        dlg = ConvertDialog(info, segments, crop)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.convert.connect(lambda opts, out: self.run_conversion(path, opts, out, info))
+        dlg.edit_video.connect(lambda: self.open_editor(path=path))
+        self.keep(dlg)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def run_conversion(self, src, opts, out=None, info=None, auto_crop=False):
+        """Convert in a worker thread; progress and Cancel in Plasma's notification area."""
+        import threading
+        import dbus
+        from . import convert, history
+        from .transfers import KILLED, PlasmaJob
+        out = out or convert.output_path(src, opts.fmt)
+        label = opts.fmt.upper()
+        cancel = threading.Event()
+        job = PlasmaJob(self.bus, on_cancel=cancel.set)
+        job.update(title=f"Converting to {label}", descriptionLabel1="File",
+                   descriptionValue1=os.path.basename(src), descriptionLabel2="To",
+                   descriptionValue2=os.path.basename(out))
         self.jobs += 1
-        self.busy_note(f"Converting {os.path.basename(video)} to {fmt.upper()}…")
-        result = {}
+        self.busy_note(f"Converting {os.path.basename(src)} to {label}…")
+        result = {"pct": -1}
+
+        def progress(f):
+            pct = int(f * 100)
+            if pct != result["pct"]:
+                result["pct"] = pct
+                self._in_gui.emit(lambda: job.update(percent=dbus.UInt32(pct)))
 
         def work():
             try:
-                to_animation(video, out, settings.get("gif.fps"), settings.get("gif.max_width"))
+                inf = info or convert.probe(src)
+                if auto_crop:
+                    opts.crop = convert.detect_bars(inf)
+                result["size"] = convert.out_size(inf, opts)
+                convert.run(src, out, opts, inf, progress, cancel)
+            except convert.Cancelled:
+                result["cancelled"] = True
             except (RuntimeError, OSError) as e:
                 result["error"] = str(e)
             self._in_gui.emit(done)
 
         def done():
             self.jobs -= 1
+            job.terminate(KILLED if result.get("cancelled") else 0)
             if result.get("error"):
-                self.notifier.notify(f"Converting to {fmt.upper()} failed", result["error"], icon="dialog-error")
-            else:
-                history.add("gif", out)
+                self.notifier.notify(f"Converting to {label} failed", result["error"], icon="dialog-error")
+            elif not result.get("cancelled"):
+                w, h = result["size"]
+                anim = opts.fmt in convert.ANIMATIONS
+                history.add("gif" if anim else "video", out, width=w, height=h)
                 mb = os.path.getsize(out) / 1e6
-                self.notifier.notify(f"{fmt.upper()} saved", f"{os.path.basename(out)} · {mb:.1f} MB", path=out,
-                                     icon="image-gif", actions=[("Open", lambda: _open(out)),
-                                                                ("Show in folder", lambda: _show_in_folder(out)),
-                                                                ("Upload", lambda: self.upload(out))])
+                self.notifier.notify(
+                    f"{label} saved", f"{os.path.basename(out)} · {w}×{h} · {mb:.1f} MB", path=out,
+                    icon="image-gif" if anim else "video-x-generic",
+                    actions=[("Open", lambda: _open(out)), ("Show in folder", lambda: _show_in_folder(out)),
+                             ("Upload", lambda: self.upload([out]))])
             self.idle_check()
         threading.Thread(target=work, daemon=True).start()
 

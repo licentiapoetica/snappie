@@ -551,8 +551,9 @@ class HistoryWindow(QMainWindow):
         e = self.current()
         ok = e is not None and self.model.exists.get(e["id"], False)
         image = ok and e.get("kind") == "image"
+        editable = image or (ok and e.get("kind") == "video")      # videos open in the video editor
         enabled = {"open": ok, "folder": ok, "copy": ok, "copy_url": bool(e and e.get("url")),
-                   "upload": ok, "edit": image, "pin": image, "delete": e is not None}
+                   "upload": ok, "edit": editable, "pin": image, "delete": e is not None}
         for name, b in self.buttons.items():
             b.setEnabled(enabled[name])
         n = len(self.model.rows)
@@ -592,7 +593,9 @@ class HistoryWindow(QMainWindow):
         add("Open URL", "open_url", "internet-web-browser", bool(e.get("url")))
         m.addSeparator()
         add("Upload", "upload", "cloud-upload", ok)
-        add("Edit", "edit", "document-edit", image)
+        video = ok and e.get("kind") == "video"
+        add("Cut and Crop" if video else "Edit", "edit", "edit-cut" if video else "document-edit", image or video)
+        add("Convert…", "convert", "transform-move", ok and e.get("kind") in ("video", "gif"))
         add("Pin to Screen", "pin", "window-pin", image)
         m.addSeparator()
         add("Remove from History", "remove", "list-remove")
@@ -600,9 +603,9 @@ class HistoryWindow(QMainWindow):
         m.exec(self.view.viewport().mapToGlobal(pos))
 
     def _activate(self):
-        """Screenshots open in our editor; videos and GIFs in their default app."""
+        """Screenshots open in our editor, videos in the video editor; GIFs in their default app."""
         e = self.current()
-        if e and e.get("kind") == "image" and os.path.exists(e["path"]):
+        if e and e.get("kind") in ("image", "video") and os.path.exists(e["path"]):
             self._do("edit")
         else:
             self._do("open")

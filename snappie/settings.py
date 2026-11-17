@@ -55,6 +55,13 @@ DEFAULTS = {
     "gif.format": "gif",                  # gif | webp
     "gif.fps": 15,
     "gif.max_width": 960,                 # 0 = keep the native width
+    "gif.quality": 80,                    # 1–100: GIF colors / WebP quality (100 = lossless WebP)
+    # -- converting (snappie convert, the video editor's export) --
+    "convert.video_fps": 0,               # MP4/WebM output: 0 = as the source
+    "convert.video_max_width": 0,         # 0 = keep the width
+    "convert.video_quality": 80,          # 1–100, mapped to each encoder's CRF / quality scale
+    "convert.background": "#ffffff",      # behind transparent GIF/WebP frames in MP4/WebM
+    "convert.last_format": "",            # the convert dialog's last choice ("" = by the source)
 
     "dolphin_menu": True,                 # Snappie submenu in Dolphin's right-click menu
     "share_menu": True,                   # "Upload with Snappie" in KDE's Share menus (builds a plugin)

@@ -52,6 +52,17 @@ sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evde
 sudo zypper install cmake gcc-c++ kf6-purpose-devel kf6-kcoreaddons-devel qt6-dbus-devel   # optional: Share menu
 ```
 
+On Debian 13 and newer, Kubuntu 25.04 and newer, KDE neon and their derivatives:
+
+```sh
+sudo apt install python3-pyqt6 python3-pyqt6.qtsvg python3-dbus python3-gi python3-numpy \
+    python3-requests gir1.2-gstreamer-1.0 gstreamer1.0-pipewire gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad ffmpeg libwayland-client0
+sudo apt install gcc pkg-config libwayland-dev libwayland-bin   # source installs
+sudo apt install tesseract-ocr tesseract-ocr-eng python3-evdev   # optional
+sudo apt install cmake g++ libkf6purpose-dev libkf6coreaddons-dev qt6-base-dev   # optional: Share menu
+```
+
 ## Python package installation
 
 Snappie can also be installed as a Python package, without `install.sh` or a checkout.
@@ -114,18 +125,19 @@ Every action is also a command, and a global shortcut you can assign in
 | `ocr FILE`                  | copies the text of an image file                      |
 | `scroll`                    | scrolling capture of a window area                    |
 | `history`, `settings`       | windows                                               |
-| `edit FILE`, `pin FILE`     | open an image in the editor, pin it to the screen     |
+| `edit FILE`, `pin FILE`     | open an image (or a video) in the editor, pin it      |
 | `upload FILE…`              | upload files, one after another                       |
 | `upload -u NAME FILE…`      | upload with another uploader (name or `.sxcu` path)   |
-| `convert --gif/--webp FILE` | turn a video into an animated GIF / WebP next to it   |
+| `convert FILE`              | open the convert window (any format, cut, crop)       |
+| `convert --mp4 FILE`        | convert right away; also `--gif`, `--webp`, `--webm` |
 | `deps`                      | check what is installed, print the install command    |
 
 When the tray app is running, commands are handed to it instantly. Otherwise
 the command runs on its own and the process exits when done.
 
 **Dolphin:** right-click files → **Snappie** to upload them, annotate or pin
-an image, copy the text in an image, or turn a video into a GIF or WebP. Turn
-this menu off in Settings → Hotkeys.
+an image, copy the text in an image, cut and crop a video, or convert videos,
+GIFs and WebPs into each other. Turn this menu off in Settings → Hotkeys.
 
 **Share menus:** Spectacle, Gwenview, Okular and Dolphin get **Share → Upload
 with Snappie**. The app shows the link when the upload is done, and Snappie
@@ -280,6 +292,64 @@ There are two ways to find what's inside a window:
   (libvpx, in `gst-plugins-good`), which is heavier for big areas. WebM holds
   only VP9, VP8 and AV1, so other codecs record as VP9 there. VP8 can't go in
   MP4, so it's saved as WebM.
+
+## Converting
+
+`snappie convert FILE` (or Dolphin's **Convert…**) opens a small window. Pick
+GIF, animated WebP, MP4 or WebM, and set the frame rate, maximum width,
+quality, speed and the part to keep. The window shows the size and length of
+the result before you start. Progress and a Cancel button show up in Plasma's
+notification area.
+
+- Videos become GIFs or WebPs, and GIFs and WebPs become videos. GIFs and
+  WebPs become each other too, and videos change container (MKV → MP4).
+- When nothing about the picture changes, the video is copied, not
+  re-encoded: lossless and fast.
+- MP4 and WebM can't be transparent, so transparent parts of a GIF or WebP get
+  a background color (white by default).
+- **Remove black bars** finds letterbox or pillarbox bars and crops them off.
+- **Repeat** plays a short clip several times in a row in the video.
+- One quality scale (1–100) for every format: 80 is the default, and 100 makes
+  a lossless WebP.
+- Defaults for GIF / WebP and for videos are in Settings → GIF & Convert, or
+  tick "Use these as the defaults" in the window.
+
+Convert right away with the defaults, plus any of these options:
+
+```sh
+snappie convert --mp4 clip.gif                       # GIF → MP4
+snappie convert --gif --fps 12 --width 640 demo.mkv  # video → small GIF
+snappie convert --mp4 --start 0:05 --end 1:30 --cut 0:40-0:52 talk.mkv
+snappie convert --webm --crop auto --speed 1.5 movie.mp4
+```
+
+`--crop W:H:X:Y` keeps an area (`auto` removes black bars), `--repeat N` plays
+it N times, `--background '#000000'` sets the color behind transparency,
+`--no-audio` drops the sound, `--reencode` never copies, and `-o FILE` picks
+the output. Without `-o`, the result goes next to the source and never
+overwrites a file.
+
+Snappie uses the encoders your ffmpeg has. If H.264 (libx264) is missing,
+as in Fedora's and openSUSE's own ffmpeg, MP4 uses OpenH264 or MPEG-4.
+ffmpeg reads animated WebP from version 8 on. With an older ffmpeg, Qt's WebP
+plugin (`qt6-imageformats`) reads it instead.
+
+## Cutting and cropping videos
+
+`snappie edit video.mp4`, Dolphin's **Cut and Crop**, or double-clicking a
+video in the history opens the video editor:
+
+- **Split** (S) cuts the timeline at the playhead. Double-click a part, or
+  select it and press Delete, to remove it. Do the same again to bring it back.
+  Removed parts are skipped while playing, so you see the result.
+- **Start here** (I) and **End here** (O) remove everything before or after
+  the playhead.
+- **Crop** (C) draws a box over the video. Pick a shape (16:9, 9:16, 1:1, …)
+  or keep it free. **Remove black bars** finds the box for you.
+- Space plays and pauses. Left and Right step one frame, and Shift steps
+  faster. Ctrl+Z undoes.
+- **Export…** (Ctrl+E) opens the convert window with your cuts and crop, so
+  you can save the result as MP4, WebM, GIF or WebP.
 
 ## Files
 

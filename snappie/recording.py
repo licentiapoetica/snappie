@@ -445,7 +445,8 @@ class Recording:
 
     def _save(self, failed=None):
         """Join segments, remux / convert, report. failed: error text (still keeps the recording)."""
-        from .recorder import join_parts, remux, to_animation
+        from . import convert
+        from .recorder import join_parts, remux
         self._hide_controls()
         self._stop_live()
         if self.stream:
@@ -457,8 +458,7 @@ class Recording:
         if self.final_ext in (".gif", ".webp"):
             self.app.busy_note("Converting to " + self.final_ext[1:].upper() + "…")
             try:
-                out = to_animation(path, self.final_path, settings.get("gif.fps"),
-                                   settings.get("gif.max_width"))
+                out = convert.run(path, self.final_path, convert.Options.defaults(self.final_ext[1:]))
                 os.unlink(path)
                 path = out
             except RuntimeError as e:
