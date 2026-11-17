@@ -24,6 +24,12 @@ a new invocation only forwards its argv over D-Bus, so **restart the tray app**
 
 Logs: stderr and `~/.local/state/snappie/snappie.log`.
 
+Releases: `.github/workflows/release.yml` builds on Ubuntu 22.04 for x86-64 and
+ARM64. Tags must be `v` plus the exact `pyproject.toml` version. Publishing waits
+for the reusable tests workflow and installed-wheel checks; manual runs only
+upload preview artifacts. `.github/scripts/` contains the version gate, wheel
+smoke check and draft-first publisher. No tag should be pushed just to test a workflow.
+
 Runtime deps: python3-pyqt6 (incl. QtSvg), python3-dbus, PyGObject with GStreamer +
 GLib, numpy, gstreamer `pipewiresrc` and VA plugins (`vah265enc`/`vah264enc`/`vaav1enc`,
 `vapostproc`), libwayland-client, ffmpeg (GIF/WebP),
