@@ -1,0 +1,23 @@
+{
+    "KPlugin": {
+        "Name": "Upload with Snappie",
+        "Description": "Upload with the uploader chosen in Snappie",
+        "Icon": "snappie",
+        "Authors": [
+            {
+                "Name": "Snappie"
+            }
+        ],
+        "License": "MIT"
+    },
+    "X-Purpose-PluginTypes": ["Export"],
+    "X-Purpose-Constraints": [
+        [
+            "mimeType:image/png", "mimeType:image/jpeg", "mimeType:image/webp", "mimeType:image/gif",
+            "mimeType:image/bmp", "mimeType:image/tiff", "mimeType:image/avif", "mimeType:image/apng",
+            "mimeType:video/mp4", "mimeType:video/webm", "mimeType:video/x-matroska", "mimeType:video/quicktime",
+            "mimeType:video/x-msvideo", "mimeType:video/mpeg"
+        ]
+    ],
+    "X-Purpose-ActionDisplay": "Upload with Snappie"
+}

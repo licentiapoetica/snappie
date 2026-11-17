@@ -16,6 +16,7 @@ SETTINGS = os.path.join(CONFIG_DIR, "settings.json")
 UPLOADERS_DIR = os.path.join(CONFIG_DIR, "uploaders")    # imported ShareX .sxcu files
 HISTORY_FILE = os.path.join(DATA_DIR, "history.jsonl")
 THUMBS_DIR = os.path.join(DATA_DIR, "thumbs")
+CLIPBOARD_DIR = os.path.join(DATA_DIR, "clipboard")   # copy-only screenshots, kept for the history
 
 DEFAULTS = {
     # -- screenshots --
@@ -54,9 +55,19 @@ DEFAULTS = {
     "gif.fps": 15,
     "gif.max_width": 960,                 # 0 = keep the native width
 
+    "dolphin_menu": True,                 # Snappie submenu in Dolphin's right-click menu
+    "share_menu": True,                   # "Upload with Snappie" in KDE's Share menus (builds a plugin)
+    # -- sounds -- (sound.<event>.file: "" = the sound theme's sound; see sound.EVENTS)
+    "sound.volume": 70,
+    "sound.shot": False, "sound.shot.file": "",
+    "sound.record_start": False, "sound.record_start.file": "",
+    "sound.record_stop": False, "sound.record_stop.file": "",
+    "sound.upload": False, "sound.upload.file": "",
+    "sound.error": False, "sound.error.file": "",
     # -- uploads --
     "upload.uploader": "",                # file name in UPLOADERS_DIR, "" = none chosen
     "upload.copy_url": True,              # copy the URL after uploading
+    "upload.plasma_progress": False,      # also show uploads in Plasma's notification area (progress, cancel)
     "upload.trusted_certs": {},           # "host:port" -> SHA-256 of a trusted self-signed certificate
 
     # -- annotation defaults (the editor remembers the last used values) --

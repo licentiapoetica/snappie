@@ -9,7 +9,7 @@ import os
 import shutil
 
 from PyQt6.QtCore import QByteArray, QRectF, Qt
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
@@ -71,3 +71,24 @@ def tray_icon(state=None, color=None):
         p.end()
         icon.addPixmap(pm)
     return icon
+
+
+def progress_icon(percent):
+    """The tray icon while uploading: the percentage (0-99) in white on a black square,
+    readable at a glance even at 22 px."""
+    from PyQt6.QtGui import QFont
+    size = 64
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    p.setBrush(QColor(0, 0, 0))
+    p.setPen(QPen(QColor(0, 0, 0), 2))
+    p.drawRect(2, 2, size - 4, size - 4)
+    text = str(min(99, max(0, int(percent))))
+    p.setFont(QFont("Sans-Serif", 32 if len(text) == 1 else 26, QFont.Weight.Bold))
+    p.setPen(QColor(255, 255, 255))
+    p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, text)
+    p.end()
+    return QIcon(pm)

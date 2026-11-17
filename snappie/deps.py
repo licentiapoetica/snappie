@@ -6,7 +6,9 @@ known for Arch and openSUSE (and their derivatives); elsewhere the report names
 the missing pieces.
 """
 
+import glob
 import importlib
+import os
 import shutil
 import subprocess
 import sys
@@ -19,7 +21,7 @@ class Dep:
 
     def __init__(self, key, label, kind, names, packages, feature=None):
         """kind: python (modules) | typelib | gst (elements) | gst-any (one of them is
-        enough) | cmd | pkgconfig | library. packages: {distro family: [package, ...]}.
+        enough) | cmd | pkgconfig | library | cmake (a package's CMake config). packages: {distro family: [package, ...]}.
         feature: None when required, else what doesn't work without it."""
         self.key, self.label, self.kind, self.names = key, label, kind, names
         self.packages, self.feature = packages, feature
@@ -65,7 +67,14 @@ DEPS = [
         feature="text recognition (OCR)"),
     Dep("evdev", "python-evdev", "python", ["evdev"], _p("python-evdev", "python3-evdev"),
         feature="showing clicks and keys in recordings"),
+    # building the Share menu plugin (snappie/purpose/, share_plugin.py)
+    Dep("cmake", "CMake", "cmd", ["cmake"], _p("cmake", "cmake"), feature="the Share menu entry"),
+    Dep("c++", "a C++ compiler", "cmd", ["c++"], _p("gcc", "gcc-c++"), feature="the Share menu entry"),
+    Dep("purpose-dev", "KF6 Purpose and Qt 6 headers", "cmake", ["KF6Purpose", "KF6CoreAddons", "Qt6DBus"],
+        _p("purpose kcoreaddons qt6-base", "kf6-purpose-devel kf6-kcoreaddons-devel qt6-dbus-devel"),
+        feature="the Share menu entry"),
 ]
+SHARE_PLUGIN_DEPS = ("cmake", "c++", "purpose-dev")
 BY_KEY = {d.key: d for d in DEPS}
 
 # tesseract language code -> openSUSE package suffix (tesseract-ocr-traineddata-<name>)
@@ -143,6 +152,11 @@ def _has(dep, name):
         return bool(gst) and gst.ElementFactory.find(name) is not None
     if kind == "cmd":
         return shutil.which(name) is not None
+    if kind == "cmake":
+        dirs = ["/usr/lib", "/usr/lib64", "/usr/share", "/usr/local/lib", "/usr/local/lib64",
+                *glob.glob("/usr/lib/*-linux-gnu*")]
+        return any(os.path.isfile(os.path.join(d, "cmake", name, f"{name}Config.cmake"))
+                   or os.path.isfile(os.path.join(d, "cmake", name, f"{name.lower()}-config.cmake")) for d in dirs)
     if kind == "pkgconfig":
         if name == "wayland-scanner":
             return shutil.which(name) is not None
@@ -165,6 +179,9 @@ def missing(keys=None, optional=True):
         from .capture_helper import needs_build
         if not needs_build():
             deps = [d for d in deps if d.key not in ("compiler", "pkg-config", "wayland")]
+        from . import share_plugin
+        if not share_plugin.needs_build():
+            deps = [d for d in deps if d.key not in SHARE_PLUGIN_DEPS]
     return [d for d in deps if (optional or d.feature is None) and is_missing(d)]
 
 

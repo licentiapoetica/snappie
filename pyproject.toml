@@ -46,4 +46,5 @@ include = ["snappie", "snappie.annotate"]
 namespaces = false
 
 [tool.setuptools.package-data]
-snappie = ["icons/*.svg", "helper/*.sh", "helper/*.c", "helper/*.xml"]
+snappie = ["icons/*.svg", "helper/*.sh", "helper/*.c", "helper/*.xml",
+           "purpose/*.cpp", "purpose/*.json", "purpose/CMakeLists.txt"]

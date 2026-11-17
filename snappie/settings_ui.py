@@ -15,7 +15,8 @@ from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog,
                              QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFontComboBox, QFormLayout,
                              QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-                             QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox, QTableWidget,
+                             QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSlider, QSpinBox,
+                             QTableWidget,
                              QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
 from . import ocr, settings, style, upload
@@ -194,6 +195,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(_scroll(self._recording()), QIcon.fromTheme("media-record"), "Recording")
         self.tabs.addTab(_scroll(self._gif()), QIcon.fromTheme("image-gif"), "GIF")
         self.tabs.addTab(self._uploads(), QIcon.fromTheme("cloud-upload"), "Uploads")
+        self.tabs.addTab(_scroll(self._sounds()), QIcon.fromTheme("preferences-desktop-sound"), "Sounds")
         self.tabs.addTab(self._hotkeys(), QIcon.fromTheme("preferences-desktop-keyboard"), "Hotkeys")
         self.tabs.addTab(_scroll(self._annotation()), QIcon.fromTheme("draw-freehand"), "Annotation")
 
@@ -231,8 +233,11 @@ class SettingsDialog(QDialog):
 
     def load(self, source=None):
         """Fill the widgets from the stored settings, or from `source` (a dict like DEFAULTS)."""
+        from .app import _autostart_enabled
         for key, (_, put) in self._fields.items():
             put(source[key] if source is not None else settings.get(key))
+        # not a setting: an autostart entry (on by default, install.sh adds it)
+        self.autostart.setChecked(True if source is not None else _autostart_enabled())
         if source is None:   # restoring defaults keeps the chosen uploader
             self._default_uploader = settings.get("upload.uploader") or ""
         self._refresh_uploaders()
@@ -243,9 +248,15 @@ class SettingsDialog(QDialog):
         return out
 
     def apply(self):
+        from .app import _autostart_enabled, _set_autostart
         changes = {k: v for k, v in self.values().items() if v != settings.get(k)}
         if changes:
             settings.save(**changes)
+        if self.autostart.isChecked() != _autostart_enabled():
+            try:
+                _set_autostart(self.autostart.isChecked())
+            except OSError as e:
+                QMessageBox.warning(self, "Start with Plasma", f"Couldn't change the autostart entry: {e}")
         return changes
 
     def accept(self):
@@ -404,23 +415,104 @@ class SettingsDialog(QDialog):
         h.addLayout(col)
         v.addWidget(box, 1)
 
+        row = QHBoxLayout()
         self.test_result = QLabel()
         self.test_result.setWordWrap(True)
         self.test_result.setOpenExternalLinks(True)
         self.test_result.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        v.addWidget(self.test_result)
+        row.addWidget(self.test_result, 1)
+        self.b_response = QPushButton(QIcon.fromTheme("document-preview"), "Show Response…")
+        self.b_response.setToolTip("What the server answered to the test upload, and what the uploader "
+                                   "reads from it ({json:…} paths, headers)")
+        self.b_response.clicked.connect(self._show_response)
+        self.b_response.hide()
+        row.addWidget(self.b_response, 0, Qt.AlignmentFlag.AlignTop)
+        v.addLayout(row)
 
         box, form = _form("After uploading")
         form.addRow(self._bind("upload.copy_url", QCheckBox("Copy the URL to the clipboard")))
+        form.addRow(self._bind("upload.plasma_progress",
+                               QCheckBox("Show progress in Plasma's notifications (with a Cancel button)")))
         v.addWidget(box)
         v.addWidget(_hint("Hosts like catbox.moe, Zipline, XBackBone and Chevereto offer .sxcu files; "
                           "you can also export them from ShareX on Windows."))
         self._uploader = None
+        self._response = None     # (response, uploader config, file name) of the last test upload
         return page
+
+    def _sounds(self):
+        from . import sound
+        page = QWidget()
+        v = QVBoxLayout(page)
+        box = QGroupBox("Play a sound when")
+        grid = QGridLayout(box)
+        grid.setColumnStretch(1, 1)
+        for row, (event, (label, names)) in enumerate(sound.EVENTS.items()):
+            check = self._bind(f"sound.{event}", QCheckBox(label))
+            path = self._bind(f"sound.{event}.file", QLineEdit())
+            default = sound.theme_file(names)
+            path.setPlaceholderText(f"System sound: {os.path.splitext(os.path.basename(default))[0]}"
+                                    if default else "No system sound found: choose a file")
+            path.setClearButtonEnabled(True)
+            browse = QToolButton()
+            browse.setIcon(QIcon.fromTheme("document-open"))
+            browse.setToolTip("Choose a sound file")
+            browse.clicked.connect(lambda _=False, e=path, ev=event: self._pick_sound(e, ev))
+            test = QToolButton()
+            test.setIcon(QIcon.fromTheme("media-playback-start"))
+            test.setToolTip("Play")
+            test.clicked.connect(lambda _=False, e=event, f=path: self._test_sound(e, f.text().strip()))
+            path.setEnabled(check.isChecked())
+            check.toggled.connect(path.setEnabled)
+            for col, w in enumerate((check, path, browse, test)):
+                grid.addWidget(w, row, col)
+        v.addWidget(box)
+        box, form = _form()
+        self.sound_volume = self._bind("sound.volume", QSlider(Qt.Orientation.Horizontal))
+        self.sound_volume.setRange(0, 100)
+        form.addRow("Volume:", self.sound_volume)
+        v.addWidget(box)
+        v.addWidget(_hint("Empty means the sound from your sound theme (System Settings → Sounds). "
+                          "The recording starts after its sound has played, so the sound isn't recorded."))
+        v.addStretch(1)
+        return page
+
+    def _pick_sound(self, edit, event):
+        start = os.path.dirname(edit.text()) if edit.text() else "/usr/share/sounds"
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a sound", start,
+            "Sounds (*.oga *.ogg *.opus *.wav *.flac *.mp3 *.m4a *.aac);;All files (*)")
+        if path:
+            edit.setText(path)
+            self._test_sound(event, path)    # hear it, and find out now if it can't be played
+
+    def _test_sound(self, event, custom):
+        from . import sound
+        path = sound.file_for(event, custom)
+
+        def failed(message):
+            QMessageBox.warning(self, "Sound",
+                                f"Snappie can't play {os.path.basename(path)}:\n{message}\n\n"
+                                "Choose a WAV, OGG or FLAC file, or install the GStreamer plugins "
+                                "for this format.")
+        if not path:
+            QMessageBox.warning(self, "Sound", "No sound file found.")
+        elif not sound.play_file(path, self.sound_volume.value(), on_error=failed):
+            failed("GStreamer couldn't start playing it.")
 
     def _hotkeys(self):
         page = QWidget()
         v = QVBoxLayout(page)
+        from . import share_plugin
+        box, form = _form("KDE integration")
+        self.autostart = QCheckBox("Start Snappie with Plasma (in the system tray)")
+        form.addRow(self.autostart)
+        form.addRow(self._bind("dolphin_menu", QCheckBox(
+            "Snappie in Dolphin's right-click menu (upload, annotate, pin, OCR, convert to GIF)")))
+        form.addRow(self._bind("share_menu", QCheckBox(
+            "“Upload with Snappie” in the Share menus of Spectacle, Gwenview, Okular, Dolphin…")))
+        form.addRow(_hint(share_plugin.describe(share_plugin.status())))
+        v.addWidget(box)
         if self.hotkeys is None:
             v.addWidget(_hint("Global shortcuts belong to the running snappie tray app. Start it and "
                               "open Settings from its menu to see them here, or set them in System Settings "
@@ -604,20 +696,29 @@ class SettingsDialog(QDialog):
         if not name or self._uploader is not None:
             return
         path = test_image()
+        self._response = None
+        self.b_response.hide()
         self._uploader = upload.Uploader(self)
-        self._uploader.finished.connect(lambda res, err: self._test_done(path, res, err))
+        self._uploader.finished.connect(lambda res, err: self._test_done(path, name, res, err))
         self.b_test.setEnabled(False)
         self.test_result.setStyleSheet("")
         self.test_result.setText(f"Uploading a test image with {self.up_list.currentItem().text()}…")
         self._uploader.start(path, name)
 
-    def _test_done(self, path, res, err):
+    def _test_done(self, path, name, res, err):
         try:
             os.remove(path)
         except OSError:
             pass
         error = getattr(self._uploader, "error", None)
+        response = self._uploader.response
         self._uploader = None
+        if response is not None:
+            try:
+                self._response = (response, upload.resolve(name), os.path.basename(path))
+                self.b_response.show()
+            except upload.UploadError:
+                pass
         self._uploader_selected()
         if isinstance(error, upload.UntrustedCertificate) and ask_trust(self, error):
             self._test_upload()
@@ -631,6 +732,13 @@ class SettingsDialog(QDialog):
             return f'<a href="{u}">{u}</a>'
         extra = f"<br>Deletion URL: {link(res.delete_url)}" if res.delete_url else ""
         self.test_result.setText(f"Uploaded: {link(res.url)}{extra}")
+
+    def _show_response(self):
+        if self._response:
+            from .response_view import ResponseDialog
+            dlg = ResponseDialog(*self._response, parent=self)
+            dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            dlg.show()
 
 
 def ask_trust(parent, error):

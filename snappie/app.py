@@ -10,7 +10,7 @@ on Wayland the clipboard data lives in the process that copied it).
 import os
 import time
 
-from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QTimer
+from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QGuiApplication, QIcon, QImage, QPainter
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -30,15 +30,19 @@ def _icon(*names):
 
 
 class App(QObject):
+    _in_gui = pyqtSignal(object)   # a callable from a worker thread, run on the GUI thread
+
     def __init__(self, bus, kwin, daemon=False):
         super().__init__()
+        self._in_gui.connect(lambda fn: fn(), Qt.ConnectionType.QueuedConnection)
         self.bus, self.kwin, self.daemon = bus, kwin, daemon
         self.qapp = QApplication.instance()
         self.notifier = Notifier(bus)
         self.picker = None
         self.recording = None
         self.windows = set()       # open editors, pins, history, settings, osd (kept alive here)
-        self.jobs = 0              # running uploads / OCR / scroll captures
+        self.jobs = 0              # running OCR / scroll captures
+        self._upload_queue = None  # transfers.UploadQueue, made on the first upload
         self.tray = None
         self.exit_code = 0
         self._inspector = None
@@ -46,6 +50,8 @@ class App(QObject):
         self._last_bgs = {}
         kwin.on_stop = self.stop_recording
         kwin.on_command = self.command
+        kwin.on_upload = lambda paths, done: self.upload(paths, on_done=done)
+        self._upload_waiters = []  # [(jobs, done(urls, error))] for D-Bus callers
         QApplication.clipboard().dataChanged.connect(self._clipboard_changed)
         self._idle = QTimer(self, singleShot=True, interval=500, timeout=self._maybe_quit)
         if daemon:
@@ -87,6 +93,11 @@ class App(QObject):
                     self.recording.toggle_drawing()
             elif c == "color":
                 self.pick(mode="color", on_pick=self._color_picked)
+            elif c == "ocr" and ns.file:
+                img = QImage(ns.file)
+                if img.isNull():
+                    raise RuntimeError(f"can't open {ns.file}")
+                self.ocr(img)
             elif c == "ocr":
                 self.pick(mode="ocr", on_pick=self._ocr_picked)
             elif c == "scroll":
@@ -103,13 +114,21 @@ class App(QObject):
                     raise RuntimeError(f"can't open {ns.file}")
                 self.pin(img)
             elif c == "upload":
-                self.upload(os.path.abspath(ns.file))
+                self.upload([os.path.abspath(f) for f in ns.files], ns.uploader)
+            elif c == "convert":
+                self.convert(os.path.abspath(ns.file), "webp" if ns.webp else "gif")
             elif c == "quit":
                 self.quit()
                 return
+            elif c == "service":
+                # started by D-Bus activation: the call that started us arrives right away
+                self._idle.start(5000)
+                return
         except Exception as e:
+            from . import sound
             log("error:", e)
             self.notifier.notify("Snappie", str(e), icon="dialog-error")
+            sound.play("error")
         self.idle_check()
 
     # ------------------------------------------------------------------ lifetime
@@ -121,21 +140,63 @@ class App(QObject):
             hotkeys.install()
         except OSError as e:
             log("could not install the shortcut entries:", e)
+        self._apply_integration()
         self._show_tray()
+
+    def _apply_integration(self):
+        """Dolphin's right-click menu and the Share menu plugin, on or off as set."""
+        import threading
+        from . import servicemenu, share_plugin
+        from .hotkeys import launcher
+        try:
+            if settings.get("dolphin_menu"):
+                servicemenu.install()
+            else:
+                servicemenu.uninstall()
+        except OSError as e:
+            log("could not update the Dolphin menu:", e)
+        if not settings.get("share_menu"):
+            try:
+                share_plugin.remove()
+            except OSError as e:
+                log("could not remove the Share menu plugin:", e)
+            return
+        if getattr(self, "_building_share_plugin", False):
+            return
+        self._building_share_plugin = True
+
+        def work():   # CMake takes a few seconds: not on the GUI thread
+            try:
+                status = share_plugin.ensure(launcher())
+            except OSError as e:
+                status = f"failed: {e}"
+            self._in_gui.emit(lambda: done(status))
+
+        def done(status):
+            self._building_share_plugin = False
+            if status not in ("system", "ready"):
+                log("Share menu:", share_plugin.describe(status))
+            self.idle_check()
+        threading.Thread(target=work, daemon=True).start()
 
     def idle_check(self):
         self._idle.start()
 
     def _busy(self):
-        return bool(self.picker or self.recording or self.windows or self.jobs
-                    or self._clip_until > time.monotonic())
+        return bool(self.picker or self.recording or self.windows or self.jobs or self.uploading
+                    or getattr(self, "_building_share_plugin", False) or self._clip_until > time.monotonic())
 
     def _maybe_quit(self):
         if self.daemon:
             return
         if self._busy():
-            if not (self.picker or self.recording or self.windows or self.jobs):
+            if not (self.picker or self.recording or self.windows or self.jobs or self.uploading
+                    or getattr(self, "_building_share_plugin", False)):
                 self._idle.start(10_000)  # only the clipboard keeps us: check now and then
+            return
+        from . import sound
+        if sound.playing():
+            self._idle.start(300)          # let the last sound finish
             return
         self.quit()
 
@@ -197,9 +258,10 @@ class App(QObject):
                 self._run(cli.parse(["record"]))
 
     def _update_tray(self):
-        if not self.tray and not (self.recording and QSystemTrayIcon.isSystemTrayAvailable()):
+        if not self.tray and not ((self.recording or self.uploading)
+                                  and QSystemTrayIcon.isSystemTrayAvailable()):
             return
-        if not self.tray:  # one-shot: tray only while recording
+        if not self.tray:  # one-shot: tray only while recording or uploading
             self.tray = QSystemTrayIcon()
             self.tray.activated.connect(self._tray_activated)
             self.tray.show()
@@ -212,6 +274,8 @@ class App(QObject):
             menu.addAction(a)
             return a
 
+        add("History", ["history"], "view-history")   # first: the most used window
+        menu.addSeparator()
         rec = self.recording
         if rec:
             from .icons import tray_icon
@@ -223,9 +287,12 @@ class App(QObject):
             add("Draw on the recording", ["draw"], "draw-freehand")
             menu.addSeparator()
         else:
-            from .icons import tray_icon
-            self.tray.setIcon(tray_icon())
-            self.tray.setToolTip("Snappie — click: screenshot · middle click: record")
+            self._tray_progress(force=True)
+        if self.uploading:
+            a = QAction(_icon("dialog-cancel", "process-stop"), "Cancel upload", menu)
+            a.triggered.connect(self.uploads.cancel)
+            menu.addAction(a)
+            menu.addSeparator()
         add("Screenshot…", ["shot"], "camera-photo", not rec)
         add("Screenshot of the screen", ["shot", "--screen"], "view-fullscreen")
         add("Screenshot of the active window", ["shot", "--window"], "window")
@@ -249,15 +316,36 @@ class App(QObject):
         a.triggered.connect(self._open_image_dialog)
         menu.addAction(a)
         menu.addSeparator()
-        add("History", ["history"], "view-history")
         add("Settings", ["settings"], "configure")
-        auto = QAction("Start with Plasma", menu, checkable=True, checked=_autostart_enabled())
-        auto.toggled.connect(_set_autostart)
-        menu.addAction(auto)
         if self.daemon:
             add("Quit", ["quit"], "application-exit")
         self.tray.setContextMenu(menu)
         self._tray_menu = menu  # keep a reference
+
+    def _tray_progress(self, force=False):
+        """Tray icon and tooltip when not recording: upload progress, or the plain icon."""
+        if not self.tray or self.recording:
+            return
+        from .icons import progress_icon, tray_icon
+        if self.uploading:
+            q = self.uploads
+            pct = int(q.fraction() * 100)
+            if force or pct != getattr(self, "_tray_pct", None):
+                self.tray.setIcon(progress_icon(pct))
+            self._tray_pct = pct
+            self.tray.setToolTip(q.describe() or "Uploading…")
+        else:
+            self._tray_pct = None
+            self.tray.setIcon(tray_icon())
+            self.tray.setToolTip("Snappie — click: screenshot · middle click: record")
+
+    def _drop_oneshot_tray(self):
+        """A one-shot process shows the tray only while recording or uploading."""
+        if self.tray and not self.daemon and not self.recording and not self.uploading:
+            self.tray.hide()
+            self.tray = None
+            return True
+        return False
 
     def recording_changed(self, rec):
         if self.tray:
@@ -552,6 +640,11 @@ class App(QObject):
                 history.add("image", path, width=img.width(), height=img.height())
                 if "save" in actions or output:
                     done.append("saved")
+        if "copy" in actions and not path:
+            history.add_copied(img)    # not saved anywhere: keep it for the history
+        if done or path:
+            from . import sound
+            sound.play("shot")         # now it's taken: copied or saved, not just selected
         if "pin" in actions:
             self.pin(img, origin)
         if "edit" in actions:
@@ -660,7 +753,8 @@ class App(QObject):
                 return
         dlg = SettingsDialog(Hotkeys(self.bus))
         self.keep(dlg)
-        dlg.finished.connect(lambda _: (self.windows.discard(dlg), self._update_tray(), self.idle_check()))
+        dlg.finished.connect(lambda _: (self.windows.discard(dlg), self._update_tray(), self._apply_integration(),
+                                        self.idle_check()))
         dlg.show()
 
     def _open_image_dialog(self):
@@ -672,46 +766,131 @@ class App(QObject):
 
     # ------------------------------------------------------------------ upload / OCR / color
 
-    def upload(self, path):
-        from . import history, upload
-        if not settings.get("upload.uploader") and not upload.list_uploaders():
+    @property
+    def uploading(self):
+        return bool(self._upload_queue and self._upload_queue.active)
+
+    @property
+    def uploads(self):
+        if self._upload_queue is None:
+            from .transfers import UploadQueue
+            q = self._upload_queue = UploadQueue(self.bus, self)
+            q.changed.connect(self._tray_progress)
+            q.active_changed.connect(self._uploads_active)
+            q.job_done.connect(self._upload_done)
+            q.batch_done.connect(self._uploads_done)
+        return self._upload_queue
+
+    def upload(self, paths, uploader=None, on_done=None):
+        """Queue files for upload (a path or a list of paths). on_done(urls, error) runs once
+        these files are done (the D-Bus method answers with it)."""
+        from . import upload
+        if isinstance(paths, str):
+            paths = [paths]
+        if not uploader and not settings.get("upload.uploader") and not upload.list_uploaders():
             self.notifier.notify("No uploader set up", "Import a ShareX .sxcu uploader in Settings → Uploads",
                                  icon="dialog-information", actions=[("Settings", self.show_settings)])
+            if on_done:
+                on_done([], "No uploader set up in Snappie")
             return
-        up = upload.Uploader()
-        self.jobs += 1
-        self.busy_note(f"Uploading {os.path.basename(path)}…")
+        missing = [p for p in paths if not os.path.isfile(p)]
+        if missing:
+            self.notifier.notify("Can't upload", "Not a file: " + ", ".join(missing), icon="dialog-error")
+        paths = [p for p in paths if os.path.isfile(p)]
+        if not paths:
+            if on_done:
+                on_done([], "Not a file: " + ", ".join(missing))
+            return
+        jobs = self.uploads.add(paths, uploader)
+        if on_done:
+            self._upload_waiters.append((jobs, on_done))
 
-        def done(result, error):
-            self.jobs -= 1
-            err = getattr(up, "error", None)
-            if result is None and isinstance(err, upload.UntrustedCertificate) and err.fingerprint:
-                def trust_and_retry():
-                    upload.trust_certificate(err.host, err.port, err.fingerprint)
-                    self.upload(path)
-                self.notifier.notify("Upload blocked: untrusted certificate", str(err), icon="security-low",
-                                     actions=[("Trust certificate & retry", trust_and_retry)], timeout=0)
-            elif result is None:
-                self.notifier.notify("Upload failed", error or "unknown error", icon="dialog-error")
-            else:
-                if settings.get("upload.copy_url"):
-                    copy_text(self.bus, result.url)
-                for e in history.entries():
-                    if e.get("path") == path:
-                        history.update(e, url=result.url, delete_url=result.delete_url)
-                        break
-                else:
-                    history.add("image" if path.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
-                                else "video", path, url=result.url, delete_url=result.delete_url)
-                self.notifier.notify("Uploaded" + (" — link copied" if settings.get("upload.copy_url") else ""),
-                                     result.url, icon="cloud-upload",
-                                     actions=[("Open link", lambda: _open(result.url)),
-                                              ("Copy link", lambda: copy_text(self.bus, result.url))])
-            up.deleteLater()
-            self.idle_check()
-        up.finished.connect(done)
-        up.start(path)
-        self._uploads = getattr(self, "_uploads", set()) | {up}
+    def _answer_waiters(self):
+        for w in list(self._upload_waiters):
+            jobs, done = w
+            if all(j.finished for j in jobs):
+                self._upload_waiters.remove(w)
+                urls = [j.result.url for j in jobs if j.result is not None]
+                errors = [j.error for j in jobs if j.result is None]
+                try:
+                    done(urls, errors[0] if errors else "")
+                except Exception as e:  # noqa: BLE001 - the caller may be gone
+                    log("answering an upload request failed:", e)
+
+    def _uploads_active(self, active):
+        if active:
+            self._update_tray()      # one-shot: show the tray; daemon: add "Cancel upload"
+        elif not self._drop_oneshot_tray():
+            self._update_tray()
+        self.idle_check()
+
+    def _upload_done(self, job):
+        """One file finished: record it in the history."""
+        from . import history
+        self._answer_waiters()
+        if job.result is None:
+            log(f"upload of {job.path} failed: {job.error}")
+            return
+        log(f"uploaded {job.path}: {job.result.url}")
+        for e in history.entries():
+            if e.get("path") == job.path:
+                history.update(e, url=job.result.url, delete_url=job.result.delete_url)
+                break
+        else:
+            history.add("image" if job.path.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+                        else "video", job.path, url=job.result.url, delete_url=job.result.delete_url)
+
+    def _uploads_done(self, jobs, cancelled):
+        from . import sound, upload
+        self._answer_waiters()
+        ok = [j for j in jobs if j.result is not None]
+        failed = [j for j in jobs if j.result is None and not isinstance(j.exception, upload.Cancelled)]
+        if failed:
+            sound.play("error")
+        elif ok:
+            sound.play("upload")
+        copy = settings.get("upload.copy_url")
+        urls = [j.result.url for j in ok]
+        if copy and urls:
+            copy_text(self.bus, "\n".join(urls))
+
+        # untrusted certificates: one notification per server, retrying its files
+        untrusted = {}
+        for j in failed:
+            e = j.exception
+            if isinstance(e, upload.UntrustedCertificate) and e.fingerprint:
+                untrusted.setdefault((e.host, e.port, e.fingerprint), []).append(j)
+        for (host, port, fp), js in untrusted.items():
+            def trust_and_retry(host=host, port=port, fp=fp, js=js):
+                upload.trust_certificate(host, port, fp)
+                for u in {j.uploader for j in js}:
+                    self.upload([j.path for j in js if j.uploader == u], u)
+            self.notifier.notify("Upload blocked: untrusted certificate", str(js[0].exception),
+                                 icon="security-low", actions=[("Trust certificate & retry", trust_and_retry)],
+                                 timeout=0)
+        failed = [j for j in failed if not any(j in js for js in untrusted.values())]
+
+        if len(jobs) == 1 and ok:
+            url = urls[0]
+            self.notifier.notify("Uploaded" + (" — link copied" if copy else ""), url, icon="cloud-upload",
+                                 actions=[("Open link", lambda: _open(url)),
+                                          ("Copy link", lambda: copy_text(self.bus, url))])
+        elif len(jobs) == 1 and failed:
+            self.notifier.notify("Upload failed", failed[0].error or "unknown error", icon="dialog-error")
+        elif len(jobs) > 1 and (ok or failed):
+            title = f"Uploaded {len(ok)} of {len(jobs)} files" if (failed or cancelled) else \
+                f"Uploaded {len(ok)} files"
+            if copy and urls:
+                title += " — links copied"
+            lines = urls + [f"{j.name}: {j.error}" for j in failed]
+            if cancelled:
+                lines.append("The rest was cancelled.")
+            acts = [("Copy links", lambda: copy_text(self.bus, "\n".join(urls)))] if urls else []
+            self.notifier.notify(title, "\n".join(lines), icon="cloud-upload" if ok else "dialog-error",
+                                 actions=acts)
+        elif cancelled:
+            log("upload cancelled")
+        self.idle_check()
 
     def ocr(self, img):
         from . import ocr
@@ -737,6 +916,47 @@ class App(QObject):
         job.finished.connect(done)
         job.start(img)
         self._ocrs = getattr(self, "_ocrs", set()) | {job}
+
+    def convert(self, video, fmt):
+        """Video file → animated GIF / WebP next to it, in a thread (ffmpeg takes a while)."""
+        import shutil
+        import threading
+        from . import deps, history
+        from .recorder import to_animation
+        if not shutil.which("ffmpeg"):
+            self.notifier.notify("Converting needs ffmpeg", deps.install_hint(["ffmpeg"]),
+                                 icon="dialog-information")
+            return
+        if not os.path.isfile(video):
+            raise RuntimeError(f"Not a file: {video}")
+        base = os.path.splitext(video)[0]
+        out, n = f"{base}.{fmt}", 1
+        while os.path.exists(out):
+            out, n = f"{base}-{n}.{fmt}", n + 1
+        self.jobs += 1
+        self.busy_note(f"Converting {os.path.basename(video)} to {fmt.upper()}…")
+        result = {}
+
+        def work():
+            try:
+                to_animation(video, out, settings.get("gif.fps"), settings.get("gif.max_width"))
+            except (RuntimeError, OSError) as e:
+                result["error"] = str(e)
+            self._in_gui.emit(done)
+
+        def done():
+            self.jobs -= 1
+            if result.get("error"):
+                self.notifier.notify(f"Converting to {fmt.upper()} failed", result["error"], icon="dialog-error")
+            else:
+                history.add("gif", out)
+                mb = os.path.getsize(out) / 1e6
+                self.notifier.notify(f"{fmt.upper()} saved", f"{os.path.basename(out)} · {mb:.1f} MB", path=out,
+                                     icon="image-gif", actions=[("Open", lambda: _open(out)),
+                                                                ("Show in folder", lambda: _show_in_folder(out)),
+                                                                ("Upload", lambda: self.upload(out))])
+            self.idle_check()
+        threading.Thread(target=work, daemon=True).start()
 
     def _ocr_picked(self, sel):
         self.ocr(self.crop_background(sel.rect))
@@ -838,13 +1058,12 @@ class App(QObject):
             self.quit()
 
     def _recording_ended(self, path, error):
-        from . import history
+        from . import history, sound
+        if path or error:
+            sound.play("error" if error else "record_stop")
         rec, self.recording = self.recording, None
         self._tray_state = None
-        if self.tray and not self.daemon:
-            self.tray.hide()
-            self.tray = None
-        else:
+        if not self._drop_oneshot_tray():
             self._update_tray()
         if path:
             mb = os.path.getsize(path) / 1e6

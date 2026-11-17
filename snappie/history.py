@@ -83,8 +83,34 @@ def add(kind, path, url=None, delete_url=None, **info):
         if len(items) > MAX_ENTRIES + 100:   # compact now and then, not on every add
             for e in items[:-MAX_ENTRIES]:
                 _drop_thumb(e)
+                _drop_owned_file(e)
             _write(items[-MAX_ENTRIES:])
     return entry
+
+
+def add_copied(img):
+    """A screenshot that was only copied: keep a PNG of it in CLIPBOARD_DIR so the history can
+    show it (and it can be copied, edited or uploaded later). Returns the entry, or None."""
+    from .app_util import save_image
+    path = settings.unique_path(settings.CLIPBOARD_DIR, settings.get("shot.filename"), "png")
+    try:
+        save_image(img, path)
+    except OSError:
+        return None
+    return add("image", path, width=img.width(), height=img.height(), copied=True)
+
+
+def _owned(entry):
+    """Whether the entry's file is ours (a copy-only screenshot), not one the user saved."""
+    return os.path.abspath(entry.get("path", "")).startswith(os.path.abspath(settings.CLIPBOARD_DIR) + os.sep)
+
+
+def _drop_owned_file(entry):
+    if _owned(entry):
+        try:
+            os.remove(entry["path"])
+        except OSError:
+            pass
 
 
 def entries():
@@ -98,13 +124,16 @@ def _id(entry):
 
 
 def remove(entry):
-    """Forget an entry (the file itself is left alone)."""
+    """Forget an entry. The file is left alone, unless it only existed for the history."""
     eid = _id(entry)
     with _lock:
         items = _read()
         keep = [e for e in items if e["id"] != eid]
         if len(keep) != len(items):
             _write(keep)
+    for e in items:
+        if e["id"] == eid:
+            _drop_owned_file(e)
     _drop_thumb({"id": eid})
 
 
@@ -444,8 +473,9 @@ class HistoryWindow(QMainWindow):
         self.view.setItemDelegate(_Delegate(self.view))
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._context_menu)
-        self.view.doubleClicked.connect(lambda ix: self._do("open"))
-        self.view.activated.connect(lambda ix: self._do("open"))
+        # activated: double click (or single click, as Plasma is set) and Enter; doubleClicked would
+        # fire as well and open everything twice
+        self.view.activated.connect(lambda ix: self._activate())
         self.view.selectionModel().currentChanged.connect(lambda *_: self._sync_buttons())
         self.empty = QLabel("Nothing captured yet.\nScreenshots and recordings show up here.")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -568,6 +598,14 @@ class HistoryWindow(QMainWindow):
         add("Remove from History", "remove", "list-remove")
         add("Delete File…", "delete", "edit-delete")
         m.exec(self.view.viewport().mapToGlobal(pos))
+
+    def _activate(self):
+        """Screenshots open in our editor; videos and GIFs in their default app."""
+        e = self.current()
+        if e and e.get("kind") == "image" and os.path.exists(e["path"]):
+            self._do("edit")
+        else:
+            self._do("open")
 
     def _do(self, name):
         e = self.current()
