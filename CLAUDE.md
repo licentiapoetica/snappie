@@ -14,8 +14,9 @@ features, commands or settings change.
 ./install.sh              # symlink into ~/.local/bin, build helper, shortcut entries, autostart
 ```
 
-There is no build step for the Python side and no packaging (no pyproject). `snappie.sh`
-just sets `PYTHONPATH` and runs `python3 -m snappie`. If the tray app is already running,
+`pyproject.toml` defines the installable package and the `snappie` command; SVG icons and
+helper sources ship in the wheel. `snappie.sh` still sets `PYTHONPATH` and runs
+`python3 -m snappie` for checkout use. If the tray app is already running,
 a new invocation only forwards its argv over D-Bus, so **restart the tray app**
 (`snappie quit`) to test code changes.
 
@@ -35,7 +36,7 @@ optional tesseract (OCR), Noto Color Emoji font. libatspi via gi for the a11y pi
 | `snappie/app.py` | `App`: tray, command dispatch (`_run`), capture flows, one-shot vs daemon lifetime |
 | `snappie/kwin.py` | KWin scripting over D-Bus (JS strings), owns the `io.github.snappie` service |
 | `snappie/cast.py` | runs `snappie-cast`, PipeWire node → GStreamer frames; builds helper on demand |
-| `helper/snappie-cast.c` | C helper: `zkde_screencast_unstable_v1` streams + `org_kde_kwin_fake_input` |
+| `snappie/helper/snappie-cast.c` | C helper: `zkde_screencast_unstable_v1` streams + `org_kde_kwin_fake_input` |
 | `snappie/recorder.py` | GStreamer pipeline: pipewiresrc → crop → VAAPI encode + Opus audio → MKV |
 | `snappie/recording.py` | one recording: segments (pause/reconnect), join, remux MP4 / convert GIF/WebP |
 | `snappie/picker.py` | full-screen overlay to pick screen / window / inner area |

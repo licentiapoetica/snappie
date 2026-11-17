@@ -53,7 +53,7 @@ DEPS = [
     Dep("parsers", "GStreamer video parsers", "gst", ["h265parse", "h264parse", "av1parse"],
         _p("gst-plugins-bad-libs", "gstreamer-plugins-bad")),
     Dep("ffmpeg", "ffmpeg", "cmd", ["ffmpeg"], _p("ffmpeg", "ffmpeg")),
-    # building the capture helper (helper/build.sh)
+    # building the capture helper (snappie/helper/build.sh)
     Dep("compiler", "a C compiler", "cmd", ["cc"], _p("gcc", "gcc")),
     Dep("pkg-config", "pkg-config", "cmd", ["pkg-config"], _p("pkgconf", "pkgconf-pkg-config")),
     Dep("wayland", "Wayland client headers", "pkgconfig", ["wayland-client", "wayland-scanner"],

@@ -136,8 +136,10 @@ def run(bus):
         _remove(old_bin)
         new_bin = os.path.join(_HOME, ".local", "bin", "snappie")
         if not os.path.exists(new_bin):
-            here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            os.symlink(os.path.join(here, "snappie.sh"), new_bin)
+            from .hotkeys import launcher
+            target = launcher()
+            if os.path.isfile(target):
+                os.symlink(target, new_bin)
         did = True
     if did:
         subprocess_quiet(["kbuildsycoca6"])

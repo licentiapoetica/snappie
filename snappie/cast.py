@@ -12,7 +12,7 @@ from gi.repository import GLib, Gst  # noqa: E402
 Gst.init(None)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HELPER_SRC = os.path.join(os.path.dirname(HERE), "helper")
+HELPER_SRC = os.path.join(HERE, "helper")
 HELPER = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
                       "snappie", "snappie-cast")
 
@@ -24,7 +24,7 @@ def ensure_helper():
     src = os.path.join(HELPER_SRC, "snappie-cast.c")
     if os.path.exists(HELPER) and os.path.getmtime(HELPER) >= os.path.getmtime(src):
         return
-    r = subprocess.run([os.path.join(HELPER_SRC, "build.sh")], capture_output=True, text=True)
+    r = subprocess.run(["sh", os.path.join(HELPER_SRC, "build.sh")], capture_output=True, text=True)
     if r.returncode != 0:
         from . import deps
         gone = deps.missing(["compiler", "pkg-config", "wayland"])

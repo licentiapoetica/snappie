@@ -39,6 +39,40 @@ sudo zypper install python3-PyQt6 python3-dbus-python python3-gobject python3-nu
 sudo zypper install tesseract-ocr tesseract-ocr-traineddata-english python3-evdev   # optional
 ```
 
+## Python package installation
+
+Snappie can also be installed as a Python package, independently of the checkout.
+Install the system packages above first, then create a virtual environment that
+can use your distro's Python libraries:
+
+```sh
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install --no-deps .
+.venv/bin/snappie --help
+.venv/bin/snappie deps
+```
+
+The `snappie` command, icons and capture-helper sources are included in the package.
+The C helper is still compiled on first run, so the compiler and Wayland development
+packages remain required. GStreamer plugins, ffmpeg and optional Tesseract are also
+system dependencies. This package does not bundle Python or those tools.
+
+To register the launcher and global shortcut actions for this installation:
+
+```sh
+.venv/bin/python -c 'from snappie import hotkeys; hotkeys.install()'
+```
+
+Start `.venv/bin/snappie` and enable **Start with Plasma** in the tray menu if desired.
+Keep the virtual environment at its installed path; the desktop entries point to it.
+You can remove the source checkout after installation if the virtual environment
+is stored elsewhere. `install.sh` remains the checkout-based alternative.
+
+For development, use `pip install --no-deps -e .` in that environment. The optional
+`input` extra installs evdev for click/key visualization; `dev` provides pytest and
+the build frontend. To produce a wheel and source archive, install `build` and run
+`python -m build`.
+
 ## Tray and shortcuts
 
 `snappie` runs in the tray. Click: screenshot. Middle click: record. Right
@@ -129,7 +163,7 @@ Stop with the bar, the tray icon, Ctrl+C, or `snappie stop`. Files go to
 ## Capture
 
 The tool records through KWin's own screen-cast API, the same one Spectacle
-uses. A tiny helper binary (`helper/`) is built on first run (needs gcc and
+uses. A tiny helper binary (sources in `snappie/helper/`) is built on first run (needs gcc and
 the Wayland headers). It's authorized through a hidden `.desktop` entry, so KWin
 never shows a dialog. The same helper drives the auto-scrolling for scrolling
 capture, through KWin's fake-input protocol.

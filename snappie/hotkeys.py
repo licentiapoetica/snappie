@@ -10,6 +10,7 @@ D-Bus (fast path in __main__).  No keys are assigned by default.
 import os
 import shutil
 import subprocess
+import sys
 
 import dbus
 
@@ -40,7 +41,13 @@ ACTIONS = [
 
 
 def launcher():
-    """The command KDE should run: the installed `snappie`, else this checkout's script."""
+    """Find the installed entry point, including a venv outside PATH, or the checkout script."""
+    invoked = os.path.abspath(sys.argv[0])
+    if os.path.basename(invoked) == "snappie" and os.path.isfile(invoked):
+        return invoked
+    sibling = os.path.join(os.path.dirname(sys.executable), "snappie")
+    if os.path.isfile(sibling):
+        return sibling
     found = shutil.which("snappie")
     if found:
         return found
