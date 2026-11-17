@@ -14,7 +14,8 @@ import os
 
 from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QImage, QKeySequence, QPainter, QPen, QPolygonF
-from PyQt6.QtWidgets import QComboBox, QLabel, QMainWindow, QSizePolicy, QToolBar, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (QComboBox, QLabel, QMainWindow, QPushButton, QSizePolicy, QToolBar, QVBoxLayout,
+                             QWidget)
 
 from . import convert, style
 from .app_util import log
@@ -469,12 +470,15 @@ class VideoEditor(QMainWindow):
         self.mute_act = self._act("Mute", "audio-volume-muted", lambda on: self.player.set_muted(on), ["M"],
                                   checkable=True)
         tb.addAction(self.mute_act)
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        tb.addWidget(spacer)
+        # Export sits in the status bar, not the toolbar: a narrow window moves the toolbar's
+        # last buttons into an overflow menu, and this one has to stay in sight
         exp = self._act("Export…", "document-save-as", self._export, ["Ctrl+E", "Ctrl+S"],
                         "Choose a format and save the result")
-        tb.addAction(exp)
+        button = QPushButton(exp.icon(), exp.text())
+        button.setToolTip(exp.toolTip())
+        button.setDefault(True)
+        button.clicked.connect(exp.trigger)
+        self.statusBar().addPermanentWidget(button)
         for keys, dt in ((["Left"], -1), (["Right"], 1), (["Shift+Left", "J"], -50), (["Shift+Right", "L"], 50)):
             self._act("", "", lambda _=False, d=dt: self.step(d), keys)
         self._act("", "", lambda: self._seek(0, True), ["Home"])
