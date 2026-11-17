@@ -412,6 +412,8 @@ class SettingsDialog(QDialog):
 
         box, form = _form("After uploading")
         form.addRow(self._bind("upload.copy_url", QCheckBox("Copy the URL to the clipboard")))
+        form.addRow(self._bind("upload.plasma_progress",
+                               QCheckBox("Show progress in Plasma's notifications (with a Cancel button)")))
         v.addWidget(box)
         v.addWidget(_hint("Hosts like catbox.moe, Zipline, XBackBone and Chevereto offer .sxcu files; "
                           "you can also export them from ShareX on Windows."))

@@ -68,7 +68,7 @@ def _main():
             print(f"snappie: nothing is running ({ns.cmd})", file=sys.stderr)
             return 1
         return code
-    code = _forward(cli.normalize(argv))
+    code = _forward(cli.absolute_paths(cli.normalize(argv)))
     if code is not None:
         return code
 

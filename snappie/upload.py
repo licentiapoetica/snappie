@@ -11,6 +11,8 @@ Only the .sxcu format is supported, no built-in hosts: people already have
 """
 
 import base64
+import binascii
+import io
 import json
 import mimetypes
 import os
@@ -18,6 +20,7 @@ import random
 import re
 import shutil
 import threading
+import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
@@ -33,6 +36,11 @@ BODIES = ("None", "MultipartFormData", "FormURLEncoded", "JSON", "XML", "Binary"
 
 class UploadError(Exception):
     pass
+
+
+class Cancelled(UploadError):
+    def __init__(self):
+        super().__init__("Upload cancelled")
 
 
 class UntrustedCertificate(UploadError):
@@ -529,11 +537,108 @@ def resolve(name=None):
     return load_config(_read_json(path))
 
 
-def upload(path, uploader=None, session=None):
+# -- request body --------------------------------------------------------------
+
+class StreamBody:
+    """A request body read in chunks from byte strings and files, so an upload can report
+    progress and be cancelled while it is being sent.  requests sends anything with read() and a
+    length as-is, with a Content-Length header (no chunked encoding, which some hosts refuse)."""
+
+    def __init__(self, parts, progress=None, cancel=None):
+        """parts: bytes or file paths.  progress(sent, total) is called from the sending thread;
+        cancel: a threading.Event, checked before each chunk."""
+        self._parts = parts
+        self._sizes = [len(p) if isinstance(p, bytes) else os.path.getsize(p) for p in parts]
+        self.len = sum(self._sizes)
+        self._progress, self._cancel = progress, cancel
+        self._fh = None
+        self._rewind()
+
+    def __len__(self):
+        return self.len
+
+    def __iter__(self):
+        # requests only treats an iterable as a stream; only streams are rewound on a redirect
+        while chunk := self.read(65536):
+            yield chunk
+
+    def _rewind(self):
+        self.close()
+        self._pos, self._i, self._off = 0, 0, 0
+
+    def tell(self):
+        return self._pos
+
+    def seek(self, pos, whence=io.SEEK_SET):
+        # only rewinding to the start (requests does that to resend a body after a redirect)
+        if pos != 0 or whence != io.SEEK_SET:
+            raise io.UnsupportedOperation("can only rewind to the start")
+        self._rewind()
+        return 0
+
+    def read(self, n=-1):
+        if self._cancel is not None and self._cancel.is_set():
+            raise Cancelled()
+        if n is None or n < 0:
+            n = self.len - self._pos
+        out = []
+        while n > 0 and self._i < len(self._parts):
+            part, size = self._parts[self._i], self._sizes[self._i]
+            take = min(n, size - self._off)
+            if isinstance(part, bytes):
+                chunk = part[self._off:self._off + take]
+            else:
+                try:
+                    if self._fh is None:
+                        self._fh = open(part, "rb")
+                    chunk = self._fh.read(take)
+                except OSError as e:
+                    raise UploadError(f"Can't read {part}: {e.strerror or e}") from None
+                if len(chunk) < take:
+                    raise UploadError(f"{os.path.basename(part)} changed while it was uploading")
+            out.append(chunk)
+            self._off += take
+            self._pos += take
+            n -= take
+            if self._off >= size:
+                self.close()
+                self._i, self._off = self._i + 1, 0
+        if self._progress:
+            self._progress(self._pos, self.len)
+        return b"".join(out)
+
+    def close(self):
+        if self._fh:
+            self._fh.close()
+            self._fh = None
+
+
+def _header_param(name, value):
+    # like urllib3 (and browsers, curl): percent-encode only \n, \r and "
+    return f'{name}="{value.translate({10: "%0A", 13: "%0D", 34: "%22"})}"'
+
+
+def multipart_body(fields, file_field, filename, path, mime, progress=None, cancel=None):
+    """multipart/form-data with the file streamed from disk, laid out exactly like requests
+    (urllib3) does it.  -> (StreamBody, content type)"""
+    boundary = binascii.hexlify(os.urandom(16)).decode()
+    head = b""
+    for k, v in fields.items():
+        head += (f"--{boundary}\r\nContent-Disposition: form-data; {_header_param('name', k)}\r\n\r\n"
+                 f"{v}\r\n").encode()
+    head += (f"--{boundary}\r\nContent-Disposition: form-data; {_header_param('name', file_field)}; "
+             f"{_header_param('filename', filename)}\r\nContent-Type: {mime}\r\n\r\n").encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+    return StreamBody([head, path, tail], progress, cancel), f"multipart/form-data; boundary={boundary}"
+
+
+def upload(path, uploader=None, session=None, progress=None, cancel=None):
     """Upload `path` and return an UploadResult (blocking).
 
     uploader: file name in UPLOADERS_DIR, a path, a config dict, or None for the
-    default from settings.  session: something with requests' `request()` (tests)."""
+    default from settings.  session: something with requests' `request()` (tests).
+    progress(sent, total): called from this thread while the file is sent (multipart and binary
+    bodies).  cancel: a threading.Event; setting it stops sending and raises Cancelled."""
     import requests
 
     cfg = resolve(uploader)
@@ -549,12 +654,14 @@ def upload(path, uploader=None, session=None):
     mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
     kw = {}
-    fh = None
+    stream = None
     try:
         if body == "MultipartFormData":
-            fh = open(path, "rb")
-            kw["data"] = args
-            kw["files"] = {cfg.get("FileFormName") or "file": (filename, fh, mime)}
+            stream, ctype = multipart_body(args, cfg.get("FileFormName") or "file", filename, path, mime,
+                                           progress, cancel)
+            headers = {k: v for k, v in headers.items() if k.lower() != "content-type"}
+            headers["Content-Type"] = ctype
+            kw["data"] = stream
         elif body == "FormURLEncoded":
             kw["data"] = args
         elif body in ("JSON", "XML"):
@@ -562,8 +669,8 @@ def upload(path, uploader=None, session=None):
             if not any(k.lower() == "content-type" for k in headers):
                 headers["Content-Type"] = "application/json" if body == "JSON" else "application/xml"
         elif body == "Binary":
-            fh = open(path, "rb")
-            kw["data"] = fh
+            stream = StreamBody([path], progress, cancel)
+            kw["data"] = stream
             if not any(k.lower() == "content-type" for k in headers):
                 headers["Content-Type"] = mime
     except OSError as e:
@@ -596,8 +703,8 @@ def upload(path, uploader=None, session=None):
     except requests.exceptions.RequestException as e:
         raise UploadError(f"Upload failed: {e}") from None
     finally:
-        if fh:
-            fh.close()
+        if stream:
+            stream.close()
 
     syn.response = resp
     if resp.status_code >= 400:
@@ -630,24 +737,41 @@ def _reason(e):
 # -- Qt wrapper -----------------------------------------------------------------
 
 class Uploader(QObject):
-    """Runs upload() in a thread; `finished` arrives on the GUI thread."""
+    """Runs upload() in a thread; `progress` and `finished` arrive on the GUI thread."""
 
     finished = pyqtSignal(object, str)   # (UploadResult | None, error text)
+    progress = pyqtSignal(object, object)   # bytes sent, total (Python ints: files can be > 2 GiB)
     _done = pyqtSignal(object, str)
+    _progress = pyqtSignal(object, object)
     _running = set()                     # keep instances alive while they work
+    PROGRESS_INTERVAL = 0.1              # seconds between progress signals
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.error = None
+        self._cancel = threading.Event()
+        self._last = 0.0
         self._done.connect(self._finish, Qt.ConnectionType.QueuedConnection)
+        self._progress.connect(self.progress, Qt.ConnectionType.QueuedConnection)
 
     def start(self, path, uploader=None):
         Uploader._running.add(self)
         threading.Thread(target=self._work, args=(path, uploader), daemon=True).start()
 
+    def cancel(self):
+        """Stop sending. Once the file is sent the server's answer is still awaited."""
+        self._cancel.set()
+
+    def _report(self, sent, total):
+        now = time.monotonic()
+        if sent >= total or now - self._last >= self.PROGRESS_INTERVAL:
+            self._last = now
+            self._progress.emit(sent, total)
+
     def _work(self, path, uploader):
         self.error = None
         try:
-            res, err = upload(path, uploader), ""
+            res, err = upload(path, uploader, progress=self._report, cancel=self._cancel), ""
         except UploadError as e:
             res, err = None, str(e)
             self.error = e       # e.g. UntrustedCertificate: the caller can offer to trust it

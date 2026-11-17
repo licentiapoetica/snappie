@@ -57,6 +57,7 @@ DEFAULTS = {
     # -- uploads --
     "upload.uploader": "",                # file name in UPLOADERS_DIR, "" = none chosen
     "upload.copy_url": True,              # copy the URL after uploading
+    "upload.plasma_progress": True,       # show uploads in Plasma's notification area (progress, cancel)
     "upload.trusted_certs": {},           # "host:port" -> SHA-256 of a trusted self-signed certificate
 
     # -- annotation defaults (the editor remembers the last used values) --

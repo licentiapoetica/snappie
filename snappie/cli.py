@@ -2,6 +2,7 @@
 tray app is running that process only parses, forwards over D-Bus and exits."""
 
 import argparse
+import os
 
 COMMANDS = ["tray", "shot", "record", "stop", "pause", "draw", "color", "ocr", "scroll",
             "history", "settings", "edit", "pin", "upload", "quit", "deps"]
@@ -44,10 +45,13 @@ def build_parser():
     sub.add_parser("scroll", help="scrolling capture of a window area")
     sub.add_parser("history", help="show the capture history")
     sub.add_parser("settings", help="open the settings")
-    for name, what in (("edit", "open an image in the editor"), ("pin", "pin an image on the screen"),
-                       ("upload", "upload a file with the chosen uploader")):
+    for name, what in (("edit", "open an image in the editor"), ("pin", "pin an image on the screen")):
         p = sub.add_parser(name, help=what)
         p.add_argument("file")
+    p = sub.add_parser("upload", help="upload files with the chosen uploader (one after another)")
+    p.add_argument("files", nargs="+", metavar="file")
+    p.add_argument("-u", "--uploader", help="an imported uploader (its file name) or an .sxcu file "
+                                            "(default: the one chosen in settings)")
     sub.add_parser("quit", help="quit the tray app")
     sub.add_parser("deps", help="check what Snappie needs from the system")
     return ap
@@ -85,6 +89,33 @@ def normalize(argv):
         return ["stop"]
     if argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
         return ["record"] + argv
+    return argv
+
+
+def absolute_paths(argv):
+    """File arguments as absolute paths: a forwarded command runs in the tray app, whose working
+    directory is somewhere else.  argv must be normalized and valid."""
+    argv = list(argv)
+    if argv and argv[0] in ("edit", "pin", "upload"):
+        out, value_of = argv[:1], None
+        for a in argv[1:]:
+            if value_of:     # an imported uploader is a bare file name; an .sxcu path is a path
+                out.append(os.path.abspath(a) if os.sep in a else a)
+                value_of = None
+            elif a in ("-u", "--uploader"):
+                out.append(a)
+                value_of = a
+            elif a.startswith("--uploader="):
+                v = a[len("--uploader="):]
+                out.append("--uploader=" + (os.path.abspath(v) if os.sep in v else v))
+            else:
+                out.append(a if a.startswith("-") else os.path.abspath(a))
+        return out
+    for i, a in enumerate(argv):
+        if a in ("-o", "--output") and i + 1 < len(argv):
+            argv[i + 1] = os.path.abspath(argv[i + 1])
+        elif a.startswith("--output="):
+            argv[i] = "--output=" + os.path.abspath(a[len("--output="):])
     return argv
 
 
