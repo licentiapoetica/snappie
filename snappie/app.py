@@ -328,12 +328,12 @@ class App(QObject):
         """Tray icon and tooltip when not recording: upload progress, or the plain icon."""
         if not self.tray or self.recording:
             return
-        from .icons import tray_icon
+        from .icons import progress_icon, tray_icon
         if self.uploading:
             q = self.uploads
             pct = int(q.fraction() * 100)
             if force or pct != getattr(self, "_tray_pct", None):
-                self.tray.setIcon(tray_icon(progress=q.fraction()))
+                self.tray.setIcon(progress_icon(pct))
             self._tray_pct = pct
             self.tray.setToolTip(q.describe() or "Uploading…")
         else:

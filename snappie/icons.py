@@ -43,8 +43,8 @@ def _panel_color():
     return QApplication.palette().color(QPalette.ColorRole.WindowText)
 
 
-def tray_icon(state=None, color=None, progress=None):
-    """state: None, "recording" or "paused".  progress: 0..1 draws an upload pie instead."""
+def tray_icon(state=None, color=None):
+    """state: None, "recording" or "paused"."""
     color = QColor(color) if color else _panel_color()
     with open(TRAY_SVG) as f:
         svg = f.read().replace("COLOR", color.name())
@@ -56,16 +56,6 @@ def tray_icon(state=None, color=None, progress=None):
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         renderer.render(p, QRectF(0, size * 0.07, size, size * 0.86))   # the drawing is 60×52
-        if progress is not None and not state:
-            d = size * 0.5
-            r = QRectF(size - d, size - d, d, d).adjusted(1, 1, -1, -1)
-            p.setPen(QPen(QColor(0, 0, 0, 150), max(1.0, size / 22)))
-            p.setBrush(QColor(255, 255, 255, 200))
-            p.drawEllipse(r)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor("#3daee9"))
-            # at least a sliver, so a starting upload is visible too
-            p.drawPie(r, 90 * 16, -int(max(0.04, min(1.0, progress)) * 360 * 16))
         if state:
             d = size * 0.46
             r = QRectF(size - d, size - d, d, d)
@@ -81,3 +71,24 @@ def tray_icon(state=None, color=None, progress=None):
         p.end()
         icon.addPixmap(pm)
     return icon
+
+
+def progress_icon(percent):
+    """The tray icon while uploading: the percentage (0-99) in white on a black square,
+    readable at a glance even at 22 px."""
+    from PyQt6.QtGui import QFont
+    size = 64
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    p.setBrush(QColor(0, 0, 0))
+    p.setPen(QPen(QColor(0, 0, 0), 2))
+    p.drawRect(2, 2, size - 4, size - 4)
+    text = str(min(99, max(0, int(percent))))
+    p.setFont(QFont("Sans-Serif", 32 if len(text) == 1 else 26, QFont.Weight.Bold))
+    p.setPen(QColor(255, 255, 255))
+    p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, text)
+    p.end()
+    return QIcon(pm)

@@ -176,7 +176,7 @@ or delete.
 **Uploads** use ShareX custom uploaders: import any `.sxcu` file (Zipline,
 XBackBone, catbox, …) in Settings → Uploads. The link is copied when done.
 Several files upload one after another; when they're done, all the links are
-copied. While uploading, the tray icon shows the progress, and Plasma shows it
+copied. While uploading, the tray icon shows the percentage, and Plasma shows it
 in its notifications with speed, time left and a Cancel button. You can also
 cancel from the tray menu.
 
