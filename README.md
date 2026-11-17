@@ -7,6 +7,9 @@ Wayland, like ShareX on Windows. Pick a screen, a window, or a part of a
 window (a panel, a terminal pane, a browser tab's page area, …), then annotate,
 copy, save, upload, pin or record it. There's no screen-share dialog.
 
+<p align="center"><img src="docs/demo.webp" width="900"
+  alt="Picking a file list in Dolphin, marking it up with a number, an arrow, a box and a label, then uploading it: the tray icon counts up to 99 and a notification says the link was copied"></p>
+
 ```sh
 ./install.sh          # puts `snappie` on PATH, launcher + shortcut entries, autostart
 snappie               # starts the tray app
@@ -134,6 +137,9 @@ it shows up after you log in again once. Distro packages can build it with
 `snappie/purpose/CMakeLists.txt` instead.
 
 ## Picking
+
+<p align="center"><img src="docs/picker.webp" width="720"
+  alt="The picker highlighting a file row, then scrolling up through the file list, split pane, window and screen"></p>
 
 For screenshots, the screen freezes. For recordings, it dims. The smallest
 area under the cursor is highlighted, and a click takes it. Scroll up for
