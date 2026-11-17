@@ -57,10 +57,16 @@ if [ "$RELEASE_PRERELEASE" != true ]; then
     elif [ "$found" != 0 ]; then
         exit "$found"
     else
-        newest=$(printf '%s\n' "${current#v}" "${RELEASE_TAG#v}" | sort -V | tail -n 1)
-        if [ "$newest" = "${RELEASE_TAG#v}" ]; then
-            latest=true
-        fi
+        # Match the PEP 440 ordering used by the package version gate, including
+        # local versions, postreleases and epochs. Invalid tags leave the draft.
+        latest=$(python - "$current" "$RELEASE_TAG" <<'PY'
+import sys
+from packaging.version import Version
+
+current, candidate = (Version(tag.removeprefix("v")) for tag in sys.argv[1:])
+print(str(candidate >= current).lower())
+PY
+        )
     fi
 fi
 gh release edit "$RELEASE_TAG" --draft=false --prerelease="$RELEASE_PRERELEASE" --latest="$latest"
