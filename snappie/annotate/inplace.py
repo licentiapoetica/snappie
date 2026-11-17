@@ -44,6 +44,7 @@ class InPlaceEditor(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._done = False
+        self.can_record = False  # middle click: record this area instead (set by the app)
         geo = screen.geometry()
         origin = geo.topLeft()
         if geo.width() and abs(background.width() / background.devicePixelRatio() - geo.width()) > 1:
@@ -234,6 +235,8 @@ class InPlaceEditor(QWidget):
         used = self.canvas.press(ev.position(), ev.button(), ev.modifiers())
         if not used and ev.button() == Qt.MouseButton.RightButton and not self.doc.shapes:
             self.finish("cancel")       # like the picker, while nothing has been drawn
+        elif not used and ev.button() == Qt.MouseButton.MiddleButton and self.can_record:
+            self.finish("record")       # like the picker: record the area instead
 
     def mouseMoveEvent(self, ev):
         pos = ev.position()

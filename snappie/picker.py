@@ -85,6 +85,7 @@ class Selection:
         self.window_style = "plain"
         self.color = None
         self.front = None
+        self.record = False    # screenshot picker: middle click asks for a recording of it instead
 
 
 def _base_caption(caption):
@@ -108,6 +109,7 @@ class Picker(QObject):
         self.frozen = mode != "record" and bool(self.backgrounds)
         self.magnifier = magnifier or mode == "color"
         self.window_style = window_style
+        self.can_record = False  # screenshot picker: middle click records the area instead (set by the app)
         # topmost first; panels are in it so the window under a panel isn't picked through it.
         # Our own windows (settings, editor, history) can be picked, our overlays can't.
         overlays = overlay_titles()
@@ -391,6 +393,8 @@ class Picker(QObject):
             self.press = p
         elif button == Qt.MouseButton.RightButton:
             self._finish(None)
+        elif button == Qt.MouseButton.MiddleButton and self.can_record:
+            self._record(p)
 
     def mouse_release(self, p, button):
         if button != Qt.MouseButton.LeftButton or self.press is None:
@@ -400,13 +404,9 @@ class Picker(QObject):
         press, drag = self.press, self.drag
         self.press = self.drag = None
         if drag is not None and drag.width() >= 16 and drag.height() >= 16:
-            w = self._window_at(press)
-            if w and not QRect(*w["frame"]).contains(drag):
-                w = None
-            if self.mode == "scroll" and not w:
-                self.status = "drag inside one window"
-                return self._update()
-            self._finish(Selection(drag, w, "Region", "region"))
+            sel = self._drag_selection(press, drag)
+            if sel:
+                self._finish(sel)
         elif drag is None:
             self.cursor = p
             if self.mode != "color":
@@ -414,6 +414,37 @@ class Picker(QObject):
             self.select_current()
         else:
             self._update()
+
+    def _drag_selection(self, press, drag):
+        w = self._window_at(press)
+        if w and not QRect(*w["frame"]).contains(drag):
+            w = None
+        if self.mode == "scroll" and not w:
+            self.status = "drag inside one window"
+            return self._update()
+        return Selection(drag, w, "Region", "region")
+
+    def _record(self, p):
+        """Middle click: record the highlighted area, or the rectangle being dragged, instead."""
+        if self.drag is not None:
+            self.mouse_move(p)
+        press, drag = self.press, self.drag
+        self.press = self.drag = None
+        if drag is not None:
+            if drag.width() < 16 or drag.height() < 16:
+                return self._update()
+            sel = self._drag_selection(press, drag)
+            if sel is None:
+                return
+        else:
+            self.cursor = p
+            self._refresh()
+            if not self.levels:
+                return
+            lv = self.levels[self.level]
+            sel = Selection(lv.rect, lv.win, lv.describe(), lv.kind)
+        sel.record = True
+        self._finish(sel)
 
     def wheel(self, dy):
         self._wheel += dy
@@ -824,6 +855,8 @@ class Overlay(QWidget):
             items = [("Scroll ▼ ▲", "smaller / bigger"), ("Click", MODES.get(pk.mode, "pick"))]
             if pk.mode != "scroll":
                 items.append(("Drag", "free region"))
+            if pk.can_record:
+                items.append(("Middle", "record it"))
             if mode:
                 items.append(("Tab", mode))
             target = pk.front_target()

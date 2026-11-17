@@ -161,6 +161,7 @@ bigger ones, or point at the title bar to take the whole window:
 | Tab               | switch inner detection: accessibility tree ↔ from pixels   |
 | click / Enter     | take the highlighted area                                  |
 | drag              | a free rectangle                                           |
+| middle click      | screenshots: record the area instead (in the picker or while annotating)  |
 | F                 | bring a covered window to the front; again: the one behind |
 | M                 | magnifier (pixel loupe with the color under the cursor)    |
 | W                 | screenshots of a whole window: plain / transparent / shadow |
