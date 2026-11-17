@@ -3,7 +3,8 @@
 set -euo pipefail
 : "${RELEASE_TAG:?}" "${RELEASE_PRERELEASE:?}"
 
-assets=(dist/*.whl dist/*.tar.gz dist/SHA256SUMS)
+assets=(dist/*.whl dist/*.tar.gz dist/snappie-[0-9]*.pkg.tar.zst
+        dist/snappie-purpose-*.pkg.tar.zst dist/SHA256SUMS)
 for asset in "${assets[@]}"; do
     test -f "$asset"
 done
@@ -30,7 +31,9 @@ release_field() {
 notes="Linux wheels for x86-64 and ARM64, built on Ubuntu 22.04. Install with Python 3.10+ "
 notes+="on a system with glibc 2.35+ and libwayland-client. KDE Plasma 6 on Wayland and the "
 notes+="documented runtime packages are required; see the README for installation. "
-notes+="SHA256SUMS covers the attached wheels and source archive."
+notes+="Arch Linux x86-64 packages are also attached: snappie and optional snappie-purpose "
+notes+="for KDE Share menus. They target an up-to-date Arch system and its current Python minor "
+notes+="version. Install with pacman -U; see the README. SHA256SUMS covers all attached packages and source archives."
 
 found=0
 draft=$(release_field isDraft "$RELEASE_TAG") || found=$?

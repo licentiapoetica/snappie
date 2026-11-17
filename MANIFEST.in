@@ -3,3 +3,5 @@ include install.sh snappie.sh helper/build.sh
 include pytest.ini requirements.txt
 recursive-include .github/scripts *.py *.sh
 recursive-include tests *.py
+recursive-include packaging/arch *.in
+include docs/releasing.md

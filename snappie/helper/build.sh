@@ -13,6 +13,6 @@ for proto in zkde-screencast-unstable-v1 fake-input; do
     wayland-scanner client-header "$src/$proto.xml" "$build/$proto-client-protocol.h"
     wayland-scanner private-code "$src/$proto.xml" "$build/$proto-protocol.c"
 done
-${CC:-cc} -O2 -Wall -I"$build" $(pkg-config --cflags wayland-client) \
+${CC:-cc} ${CPPFLAGS:-} ${CFLAGS:--O2} -Wall -I"$build" $(pkg-config --cflags wayland-client) \
     "$src/snappie-cast.c" "$build/zkde-screencast-unstable-v1-protocol.c" "$build/fake-input-protocol.c" \
-    $(pkg-config --libs wayland-client) -o "$1"
+    $(pkg-config --libs wayland-client) ${LDFLAGS:-} -o "$1"

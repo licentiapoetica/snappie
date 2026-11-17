@@ -65,6 +65,32 @@ sudo apt install tesseract-ocr tesseract-ocr-eng python3-evdev pipewire-bin   # 
 sudo apt install cmake g++ libkf6purpose-dev libkf6coreaddons-dev qt6-base-dev   # optional: Share menu
 ```
 
+## Arch Linux packages
+
+Releases with Arch artifacts provide `snappie-VERSION-1-x86_64.pkg.tar.zst` and
+optional `snappie-purpose-VERSION-1-x86_64.pkg.tar.zst`. Download them from
+[GitHub Releases](https://github.com/licentiapoetica/snappie/releases), then:
+
+```sh
+sudo pacman -Syu
+sudo pacman -U ~/Downloads/snappie-VERSION-1-x86_64.pkg.tar.zst
+# Optional KDE Share menu integration:
+sudo pacman -U ~/Downloads/snappie-purpose-VERSION-1-x86_64.pkg.tar.zst
+/usr/bin/snappie
+```
+
+Use the actual downloaded filenames. Pacman installs the runtime dependencies;
+both the capture helper and optional Share plugin are prebuilt. The package owns
+the launcher, icon and Share plugin; starting the app registers your shortcuts.
+Settings and history remain in your user directory.
+
+These packages target an up-to-date Arch Linux x86-64 system and the Python minor
+version used for that build. A new Python minor version needs a rebuilt package;
+use a newer release or build the source with the recipe described in
+[the release guide](docs/releasing.md#arch-packages). If upgrading from a wheel
+installation, `~/.local/bin/snappie` may still point to the old virtual environment;
+use `/usr/bin/snappie` to launch the pacman-managed installation.
+
 ## Python package installation
 
 Snappie can also be installed as a Python package, without `install.sh` or a checkout.
