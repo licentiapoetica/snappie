@@ -62,7 +62,7 @@ def desktop_entry(exe):
         "Name=Snappie",
         "GenericName=Screenshots and Screen Recording",
         "Comment=Capture, annotate, record and share your screen",
-        f"Exec={exe}",
+        f"Exec={exe} tray --foreground",
         "Icon=snappie",
         "Categories=Utility;Graphics;AudioVideo;Recorder;",
         "Keywords=screenshot;screen;record;capture;gif;annotate;ocr;color;",

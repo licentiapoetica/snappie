@@ -22,7 +22,12 @@ installs it at a stable path and registers it with KWin. `snappie.sh` still sets
 a new invocation only forwards its argv over D-Bus, so **restart the tray app**
 (`snappie quit`) to test code changes.
 
-Logs: stderr and `~/.local/state/snappie/snappie.log`.
+Tray startup forks before importing D-Bus/GLib/Qt and waits for event-loop readiness.
+`snappie --foreground` (or `tray --foreground`) keeps the tray attached for debugging.
+One-shot commands and D-Bus `service` activation stay in the foreground.
+Generated launcher/autostart entries use `tray --foreground` for session supervision.
+Logs: stderr and `~/.local/state/snappie/snappie.log`; background stdout/stderr goes
+to `~/.local/state/snappie/console.log`.
 
 Releases: see [docs/releasing.md](docs/releasing.md). `.github/workflows/release.yml`
 builds on Ubuntu 22.04 for x86-64 and ARM64 and tags wheels `manylinux_2_35` (its glibc).

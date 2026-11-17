@@ -142,6 +142,10 @@ class App(QObject):
             hotkeys.install()
         except OSError as e:
             log("could not install the shortcut entries:", e)
+        try:
+            _refresh_autostart()
+        except OSError as e:
+            log("could not update the autostart entry:", e)
         self._apply_integration()
         self._show_tray()
 
@@ -1243,13 +1247,30 @@ def _autostart_enabled():
     return os.path.exists(AUTOSTART)
 
 
-def _set_autostart(on):
+def _autostart_entry():
     from .hotkeys import launcher
+    # --foreground: Plasma's session should own the process, not a detached copy of it
+    return ("[Desktop Entry]\nType=Application\nName=snappie\n"
+            f"Exec={launcher()} tray --foreground\nIcon={ICON}\nX-KDE-autostart-phase=2\nNoDisplay=true\n")
+
+
+def _set_autostart(on):
     path = os.path.normpath(AUTOSTART)
     if on:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
-            f.write("[Desktop Entry]\nType=Application\nName=snappie\n"
-                    f"Exec={launcher()} tray\nIcon={ICON}\nX-KDE-autostart-phase=2\nNoDisplay=true\n")
+            f.write(_autostart_entry())
     elif os.path.exists(path):
         os.unlink(path)
+
+
+def _refresh_autostart():
+    """Rewrite an existing autostart entry written by an older version (or another install)."""
+    path = os.path.normpath(AUTOSTART)
+    try:
+        with open(path) as f:
+            if f.read() == _autostart_entry():
+                return
+    except FileNotFoundError:
+        return  # off: leave it off
+    _set_autostart(True)

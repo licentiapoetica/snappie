@@ -38,6 +38,18 @@ def _excepthook(kind, value, tb):
 
 
 def main():
+    code = 1
+    try:
+        code = _run()
+        return code
+    finally:
+        # Normal commands don't import the detachment machinery (hotkey fast path).
+        startup = sys.modules.get("snappie.background")
+        if startup is not None:
+            startup.finished(code)
+
+
+def _run():
     try:
         return _main()
     except (ImportError, ValueError):
@@ -62,6 +74,11 @@ def _main():
     if ns.cmd == "deps":
         from . import deps
         return deps.main()
+    if ns.cmd == "tray" and not ns.foreground:
+        from .background import detach
+        code = detach()
+        if code is not None:
+            return code
     if ns.cmd in ("stop", "pause", "draw", "quit"):
         code = _forward(cli.normalize(argv))
         if code is None:
@@ -118,6 +135,11 @@ def _main():
         signal_add(GLib.PRIORITY_DEFAULT, sig, lambda: app.quit() or True)
     if ns.cmd != "tray":
         GLib.idle_add(lambda: app._run(ns) or False)
+    startup = sys.modules.get("snappie.background")
+    if startup is not None:
+        GLib.idle_add(startup.ready)
+        if startup.detached:
+            GLib.timeout_add_seconds(600, startup.trim_console)
     try:
         return qapp.exec() or app.exit_code
     finally:

@@ -12,7 +12,8 @@ copy, save, upload, pin or record it. There's no screen-share dialog.
 
 ```sh
 ./install.sh          # puts `snappie` on PATH, launcher + shortcut entries, autostart
-snappie               # starts the tray app
+snappie               # starts the tray app in the background
+snappie --foreground  # run in the terminal for debugging
 snappie --help        # all commands
 ```
 
@@ -105,6 +106,13 @@ desktop entries or write to your user data directory.
 `snappie` runs in the tray. Click: screenshot. Middle click: record. Right
 click: everything else (delays, last area, GIF, OCR, color picker, scrolling
 capture, history, settings). Starting with Plasma is set in Settings → Hotkeys.
+
+Starting `snappie` (or `snappie tray`) returns to the terminal once the tray app
+is ready. It keeps running when that terminal closes. Use `snappie --foreground`
+or `snappie tray --foreground` to stay attached and see diagnostics in the terminal.
+Application logs are in `~/.local/state/snappie/snappie.log`; background console
+output and startup errors are in `~/.local/state/snappie/console.log` (or under
+`$XDG_STATE_HOME` when set). Stop the tray app with `snappie quit`.
 
 Every action is also a command, and a global shortcut you can assign in
 **System Settings → Shortcuts → snappie** (none are set by default):

@@ -1,8 +1,16 @@
 """Desktop entries must keep working when an installed venv isn't on PATH."""
 
 import os
+import configparser
 
 from snappie import hotkeys
+
+
+def test_desktop_launcher_stays_attached_to_session_manager():
+    desktop = configparser.ConfigParser(interpolation=None)
+    desktop.read_string(hotkeys.desktop_entry("/opt/snappie"))
+    assert desktop["Desktop Entry"]["Exec"] == "/opt/snappie tray --foreground"
+    assert desktop["Desktop Action Screenshot"]["Exec"] == "/opt/snappie shot"
 
 
 def test_launcher_uses_invoked_entry_point(tmp_path, monkeypatch):
