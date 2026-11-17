@@ -16,9 +16,9 @@ snappie               # starts the tray app
 snappie --help        # all commands
 ```
 
-`install.sh` links `snappie` into `~/.local/bin` if that folder is on your PATH.
-If it isn't (as on Arch), it links it into `/usr/local/bin` instead and asks for
-your sudo password.
+`install.sh` links `snappie` into `~/.local/bin`. If that folder isn't on your
+PATH yet (as on Arch), it adds it to `~/.bashrc` (or `~/.zshrc`, or a fish
+`conf.d` file). Open a new terminal afterwards.
 
 ## Requirements
 
@@ -68,13 +68,15 @@ Install it into a virtual environment that can use your distro's Python librarie
 python3 -m venv --system-site-packages ~/.local/share/snappie/venv
 ~/.local/share/snappie/venv/bin/python -m pip install --no-deps ~/Downloads/snappie-VERSION-py3-none-manylinux_2_35_x86_64.whl
 ~/.local/share/snappie/venv/bin/snappie deps
-sudo ln -sf ~/.local/share/snappie/venv/bin/snappie /usr/local/bin/snappie
+mkdir -p ~/.local/bin
+ln -sf ~/.local/share/snappie/venv/bin/snappie ~/.local/bin/snappie
 ~/.local/share/snappie/venv/bin/python -c 'from snappie import hotkeys; hotkeys.install()'
 ```
 
 Use the name of the file you downloaded. `deps` lists anything still missing.
-The `ln` line puts `snappie` on your PATH. If `~/.local/bin` is already on your
-PATH, you can link it there instead and skip sudo. The last line adds the launcher and the shortcut actions. Then start `snappie`
+If your shell can't find `snappie` afterwards, `~/.local/bin` isn't on your PATH.
+Add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` and open a new terminal.
+The last line adds the launcher and the shortcut actions. Then start `snappie`
 and turn on **Start Snappie with Plasma** in Settings → Hotkeys if you like.
 Keep the environment where it is; the desktop entries point to it. To upgrade,
 install the new wheel with the same command. To check the download, save

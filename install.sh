@@ -8,21 +8,24 @@ if ! "$here/snappie.sh" deps; then
     echo "Install the packages above, then run ./install.sh again." >&2
     exit 1
 fi
-# Link the command into a folder the shell already searches. Most distros put ~/.local/bin on
-# PATH; Arch and some others don't, but /usr/local/bin is on every default PATH (needs root).
+# Link the command into ~/.local/bin. Most distros put it on PATH; Arch and some others don't,
+# so then add it to the user's shell startup file once (like rustup and pnpm do), not via sudo.
 on_path() { case ":$PATH:" in *":$1:"*|*":$1/:"*) return 0 ;; esac; return 1; }
 bin="$HOME/.local/bin"
+mkdir -p "$bin"
+ln -sf "$here/snappie.sh" "$bin/snappie"
+rc=
 if ! on_path "$bin"; then
-    if [ -w /usr/local/bin ]; then
-        ln -sf "$here/snappie.sh" /usr/local/bin/snappie && bin=/usr/local/bin
-    elif command -v sudo >/dev/null 2>&1; then
-        echo "~/.local/bin isn't on your PATH; linking snappie into /usr/local/bin (asks for sudo)"
-        sudo ln -sf "$here/snappie.sh" /usr/local/bin/snappie && bin=/usr/local/bin
+    case $(basename "${SHELL:-sh}") in
+        zsh)  rc="${ZDOTDIR:-$HOME}/.zshrc"; line='export PATH="$HOME/.local/bin:$PATH"' ;;
+        fish) rc="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/snappie.fish"
+              line='fish_add_path -g $HOME/.local/bin' ;;
+        *)    rc="$HOME/.bashrc"; line='export PATH="$HOME/.local/bin:$PATH"' ;;
+    esac
+    if ! grep -qsF "$line" "$rc"; then
+        mkdir -p "$(dirname "$rc")"
+        printf '\n# added by snappie install.sh: commands in ~/.local/bin\n%s\n' "$line" >> "$rc"
     fi
-fi
-if [ "$bin" = "$HOME/.local/bin" ]; then
-    mkdir -p "$bin"
-    ln -sf "$here/snappie.sh" "$bin/snappie"
 fi
 exe="$bin/snappie"
 "$here/helper/build.sh" >/dev/null   # capture helper (also built automatically on first run)
@@ -38,8 +41,6 @@ echo "  snappie --help     all commands (shot, record, color, ocr, scroll, …)"
 echo "  Shortcuts: System Settings → Shortcuts → snappie (no keys are set by default)"
 echo "  Dolphin:   right-click a file → Snappie (upload, annotate, pin, OCR, convert)"
 echo "  Share:     $share"
-if ! on_path "$bin"; then
-    echo "Note: $bin isn't on your PATH, so the shell won't find \`snappie\` yet. Add" >&2
-    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2
-    echo "to ~/.bashrc (or your shell's startup file), or run ./install.sh again with sudo available." >&2
+if [ -n "$rc" ]; then
+    echo "~/.local/bin is now on your PATH (set in $rc). Open a new terminal to use \`snappie\`."
 fi
