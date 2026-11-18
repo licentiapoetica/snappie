@@ -38,7 +38,7 @@ class ConvertDialog(QDialog):
         self._in_gui.connect(lambda fn: fn(), Qt.ConnectionType.QueuedConnection)
         self.setWindowTitle(TITLE)
         self.setWindowIcon(QIcon.fromTheme("snappie"))
-        have = convert.encoders()
+        self._have = have = convert.encoders()
         v = QVBoxLayout(self)
 
         head = QLabel(f"<b>{os.path.basename(info.path)}</b><br><small>{info.describe()}</small>")
@@ -50,14 +50,15 @@ class ConvertDialog(QDialog):
         self.fmt = QComboBox()
         for key, label in convert.FORMATS.items():
             why = convert.missing_encoder(key, have)
-            if key in convert.VIDEO_FORMATS and not why:
-                label += f" ({convert.ENCODER_LABEL.get(convert.video_encoder(key, have), '')})"
             self.fmt.addItem(label, key)
             if why:
                 item = self.fmt.model().item(self.fmt.count() - 1)
                 item.setEnabled(False)
                 item.setToolTip(why)
         form.addRow("Format:", self.fmt)
+        self.codec = QComboBox()
+        self.codec_label = QLabel("Codec:")
+        form.addRow(self.codec_label, self.codec)
 
         self.copy = QCheckBox("Copy the video as it is when nothing changes (lossless, fast)")
         form.addRow("", self.copy)
@@ -74,6 +75,14 @@ class ConvertDialog(QDialog):
         qrow.addWidget(self.quality, 1)
         qrow.addWidget(self.quality_label)
         form.addRow("Quality:", qrow)
+        self.size = QDoubleSpinBox(minimum=0, maximum=100000, decimals=1, singleStep=1, suffix=" MB")
+        self.size.setSpecialValueText("Any (go by the quality)")
+        self.size.setToolTip("Aim for this file size: the bitrate, frame rate and size are chosen to fit it\n"
+                             "(1 MB = 1,000,000 bytes, so it also fits limits counted in MiB)")
+        self.size_label = QLabel("File size:")
+        form.addRow(self.size_label, self.size)
+        self.two_pass = QCheckBox("Two passes (slower; hits the size exactly and looks better)")
+        form.addRow("", self.two_pass)
 
         if self.fixed_cuts:
             parts = convert.kept(info, convert.Options(segments=segments))
@@ -139,10 +148,14 @@ class ConvertDialog(QDialog):
             i = next((n for n in range(self.fmt.count()) if self.fmt.model().item(n).isEnabled()), 0)
         self.fmt.setCurrentIndex(i)
         self._kind = None
+        self._had_size = False
         self._format_changed()
         self.fmt.currentIndexChanged.connect(self._format_changed)
+        self.codec.currentIndexChanged.connect(self._update)
         for w in (self.fps, self.width, self.speed, self.repeat):
             w.valueChanged.connect(self._update)
+        self.size.valueChanged.connect(self._size_changed)
+        self.two_pass.toggled.connect(self._update)
         self.quality.valueChanged.connect(self._update)
         self.copy.toggled.connect(self._update)
         self.audio.toggled.connect(self._update)
@@ -151,8 +164,11 @@ class ConvertDialog(QDialog):
 
     def options(self):
         o = convert.Options(self.fmt.currentData(), self.fps.value(), self.width.value(), self.quality.value(),
-                            speed=round(self.speed.value(), 2), repeat=self.repeat.value(),
-                            background=self._bg.name(), audio=self.audio.isChecked(), copy=self.copy.isChecked())
+                            speed=round(self.speed.value(), 2), repeat=self.repeat.value(), background=self._bg.name(),
+                            audio=self.audio.isChecked(), copy=self.copy.isChecked(),
+                            codec=self.codec.currentData() or "", two_pass=self.two_pass.isChecked())
+        if o.fmt in convert.VIDEO_FORMATS:
+            o.target_size = int(self.size.value() * 1e6)
         if self.fixed_cuts:
             o.segments, o.crop = self.segments, self.crop
         else:
@@ -174,9 +190,18 @@ class ConvertDialog(QDialog):
                 w.blockSignals(True)
                 w.setValue(val)
                 w.blockSignals(False)
+            self.two_pass.blockSignals(True)
+            self.two_pass.setChecked(d.two_pass or bool(self.size.value()))
+            self.two_pass.blockSignals(False)
             what = "GIF / WebP" if kind == "anim" else "videos"
             self.remember.setText(f"Use these as the defaults for {what}")
         video = kind == "video"
+        self._fill_codecs(fmt)
+        self.codec.setVisible(video)
+        self.codec_label.setVisible(video)
+        self.size.setVisible(video)
+        self.size_label.setVisible(video)
+        self.two_pass.setVisible(video)
         self.copy.setVisible(video and not self.info.image)
         self.copy.setChecked(video and not self.info.image)
         self.repeat.setVisible(video)
@@ -186,25 +211,77 @@ class ConvertDialog(QDialog):
         self.audio.setVisible(video and self.info.has_audio)
         self._update()
 
+    def _fill_codecs(self, fmt):
+        """Automatic (copy if possible, else the best encoder there is), then the codecs this format
+        can hold; ones this ffmpeg can't encode are greyed out."""
+        self.codec.blockSignals(True)
+        self.codec.clear()
+        if fmt in convert.CODECS:
+            auto = convert.video_encoder(fmt, self._have)
+            self.codec.addItem(f"Automatic ({convert.ENCODER_LABEL.get(auto, auto or '?')})", "")
+            for key in convert.CODECS[fmt]:
+                self.codec.addItem(convert.CODEC_LABEL[key], key)
+                if not convert.video_encoder(fmt, self._have, key):
+                    item = self.codec.model().item(self.codec.count() - 1)
+                    item.setEnabled(False)
+                    item.setToolTip(convert.missing_encoder(fmt, self._have, key))
+            i = self.codec.findData(settings.get(f"convert.{fmt}_codec") or "")
+            self.codec.setCurrentIndex(i if i > 0 and self.codec.model().item(i).isEnabled() else 0)
+        self.codec.blockSignals(False)
+
+    def _size_changed(self, mb):
+        if bool(mb) != self._had_size:   # aiming for a size: two passes get there exactly; else as saved
+            self.two_pass.blockSignals(True)
+            self.two_pass.setChecked(bool(mb) or bool(settings.get("convert.two_pass")))
+            self.two_pass.blockSignals(False)
+        self._had_size = bool(mb)
+        self._update()
+
     def _update(self):
         o = self.options()
+        have = self._have
         pm = QPixmap(16, 16)
         pm.fill(self._bg)
         self.background.setIcon(QIcon(pm))
         self.background.setText(self._bg.name())
         copying = convert.can_copy(self.info, o)
-        self.quality.setEnabled(not copying)
-        self.quality_label.setText("—" if copying else convert.describe_quality(o.fmt, o.quality))
-        w, h = convert.out_size(self.info, o)
+        enc = convert.video_encoder(o.fmt, have, o.codec)
+        self.width.setSpecialValueText("Best for the size" if o.target_size else "Keep")
+        self.two_pass.setEnabled(enc in convert.TWO_PASS and not copying
+                                 and (bool(o.target_size) or enc in convert.CRF_TWO_PASS))
+        self.two_pass.setToolTip("" if self.two_pass.isEnabled() else
+                                 "Only with a file size: this encoder's quality mode does as well alone"
+                                 if enc in convert.TWO_PASS else "This encoder can't do two passes")
+        error, rates = "", None
+        try:
+            rates = convert.target_bitrates(self.info, o, have)
+        except RuntimeError as e:
+            error = str(e)
+        self.quality.setEnabled(not copying and not o.target_size)
+        if copying:
+            self.quality_label.setText("—")
+        elif rates:
+            self.quality_label.setText(f"{convert.ENCODER_LABEL.get(enc, enc)}, {rates[0]:,.0f} kbit/s")
+        else:
+            self.quality_label.setText(convert.describe_quality(o.fmt, o.quality, have, o.codec))
+        w, h = convert.out_size(self.info, o, have)
         parts = convert.kept(self.info, o)
         out = convert.output_path(self.info.path, o.fmt)
-        bits = [f"→ {os.path.basename(out)}", f"{w}×{h}", _time(convert.out_duration(self.info, o))]
+        bits = [f"→ {os.path.basename(out)}", f"{w}×{h}"]
+        if rates:
+            bits.append(f"{convert.frame_rate(self.info, o, have):g} fps")
+        bits.append(_time(convert.out_duration(self.info, o)))
+        if rates:
+            bits.append(f"video {rates[0]:,.0f} kbit/s" + (f" + sound {rates[1]} kbit/s" if rates[1] else ""))
+        if convert.two_passes(self.info, o, have):
+            bits.append("two passes")
         if copying:
             bits.append("streams copied, no quality loss")
         if self._detecting:
             bits.append("looking for black bars…")
-        ok = bool(parts)
-        self.summary.setText(" · ".join(bits) if ok else "Nothing left to convert: the end is before the start.")
+        ok = bool(parts) and not error
+        self.summary.setText(" · ".join(bits) if ok else
+                             error or "Nothing left to convert: the end is before the start.")
         self.go.setEnabled(ok and not self._detecting)
 
     # -- actions
@@ -247,7 +324,10 @@ class ConvertDialog(QDialog):
 
     def _accept(self):
         o = self.options()
-        settings.save(**{"convert.last_format": o.fmt})
+        saved = {"convert.last_format": o.fmt}
+        if o.fmt in convert.CODECS:
+            saved[f"convert.{o.fmt}_codec"] = o.codec
+        settings.save(**saved)
         if self.remember.isChecked():
             o.save_defaults()
         self.convert.emit(o, convert.output_path(self.info.path, o.fmt))

@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from snappie import cli
 
 
@@ -41,9 +43,8 @@ def test_ocr_file_and_convert():
     assert ns.start == 62.5 and ns.cut == [(70, 75), (80, 90)] and ns.crop == (0, 140, 1920, 800)
     assert ns.speed == 2 and ns.repeat == 1 and ns.end is None
     assert cli.parse(["convert", "--mp4", "--crop", "auto", "a.mkv"]).crop == "auto"
-    import pytest
     for bad in (["--gif", "--mp4"], ["--quality", "0"], ["--cut", "5-2"], ["--crop", "10:10"], ["--to", "avi"],
-                ["--start", "x"]):
+                ["--start", "x"], ["-c", "prores"]):
         with pytest.raises(cli.ArgError):
             cli.parse(["convert", *bad, "v.mp4"])
 
@@ -53,3 +54,26 @@ def test_absolute_paths_keep_convert_values(tmp_path, monkeypatch):
     assert cli.absolute_paths(["convert", "--to", "mp4", "--background", "#000", "--cut", "1-2", "-o", "o.mp4",
                                "a.gif"]) == ["convert", "--to", "mp4", "--background", "#000", "--cut", "1-2",
                                              "-o", str(tmp_path / "o.mp4"), str(tmp_path / "a.gif")]
+    assert cli.absolute_paths(["convert", "--webm", "-c", "vp8", "a.mp4"]) == [
+        "convert", "--webm", "-c", "vp8", str(tmp_path / "a.mp4")]
+
+
+def test_convert_codec():
+    assert cli.parse(["convert", "--webm", "-c", "vp8", "v.mp4"]).codec == "vp8"
+    assert cli.parse(["convert", "--mp4", "v.mkv"]).codec is None
+
+
+def test_convert_codecs_match_the_converter():
+    from snappie import convert
+    assert sorted(cli.CONVERT_CODECS) == sorted({k for codecs in convert.CODECS.values() for k in codecs})
+
+
+def test_convert_size():
+    ns = cli.parse(["convert", "--mp4", "--size", "8M", "--two-pass", "v.mkv"])
+    assert ns.size == 8_000_000 and ns.two_pass
+    assert cli.parse(["convert", "--mp4", "--size", "8", "v.mkv"]).size == 8_000_000
+    assert cli.parse(["convert", "--mp4", "--size", "1.5GB", "v.mkv"]).size == 1_500_000_000
+    assert cli.parse(["convert", "--mp4", "--size", "500k", "v.mkv"]).size == 500_000
+    for bad in ("8X", "1k", "big"):
+        with pytest.raises(cli.ArgError):
+            cli.parse(["convert", "--mp4", "--size", bad, "v.mkv"])

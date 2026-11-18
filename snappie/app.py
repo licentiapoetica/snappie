@@ -984,6 +984,17 @@ class App(QObject):
             self.open_convert(path)
             return
         opts = convert.Options.defaults(ns.to)
+        if (ns.codec or ns.size or ns.two_pass) and ns.to not in convert.VIDEO_FORMATS:
+            raise RuntimeError("--codec, --size and --two-pass are for MP4 and WebM.")
+        if ns.codec:
+            opts.codec = ns.codec
+        if ns.size:
+            opts.target_size, opts.two_pass = ns.size, True
+        if ns.two_pass:
+            opts.two_pass = True
+        why = convert.missing_encoder(ns.to, codec=opts.codec)
+        if why:
+            raise RuntimeError(why)
         for key in ("fps", "width", "quality", "background"):
             if getattr(ns, key) is not None:
                 setattr(opts, key, getattr(ns, key))
@@ -1050,6 +1061,7 @@ class App(QObject):
                 inf = info or convert.probe(src)
                 if auto_crop:
                     opts.crop = convert.detect_bars(inf)
+                convert.target_bitrates(inf, opts)       # a size too small fails here, before ffmpeg
                 result["size"] = convert.out_size(inf, opts)
                 convert.run(src, out, opts, inf, progress, cancel)
             except convert.Cancelled:
@@ -1067,9 +1079,12 @@ class App(QObject):
                 w, h = result["size"]
                 anim = opts.fmt in convert.ANIMATIONS
                 history.add("gif" if anim else "video", out, width=w, height=h)
-                mb = os.path.getsize(out) / 1e6
+                size = os.path.getsize(out)
+                text = f"{os.path.basename(out)} · {w}×{h} · {convert.format_size(size)}"
+                if opts.target_size and size > opts.target_size:
+                    text += f" (over the {convert.format_size(opts.target_size)} you asked for)"
                 self.notifier.notify(
-                    f"{label} saved", f"{os.path.basename(out)} · {w}×{h} · {mb:.1f} MB", path=out,
+                    f"{label} saved", text, path=out,
                     icon="image-gif" if anim else "video-x-generic",
                     actions=[("Open", lambda: _open(out)), ("Show in folder", lambda: _show_in_folder(out)),
                              ("Upload", lambda: self.upload([out]))])

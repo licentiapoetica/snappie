@@ -3,6 +3,7 @@ tray app is running that process only parses, forwards over D-Bus and exits."""
 
 import argparse
 import os
+import re
 
 COMMANDS = ["tray", "shot", "record", "stop", "pause", "draw", "color", "ocr", "scroll",
             "history", "settings", "edit", "pin", "upload", "convert", "quit", "deps"]
@@ -86,8 +87,9 @@ def _record_args(r):
 
 
 CONVERT_FORMATS = ["gif", "webp", "mp4", "webm"]
+CONVERT_CODECS = ["h264", "hevc", "av1", "mpeg4", "vp9", "vp8"]    # convert.CODECS, without importing it
 CONVERT_VALUES = {"--to", "--fps", "--width", "--quality", "--start", "--end", "--cut", "--crop", "--speed",
-                  "--repeat", "--background"}     # options whose value is not a path
+                  "--repeat", "--background", "-c", "--codec", "--size"}    # their values aren't paths
 
 
 def _convert_args(c):
@@ -95,6 +97,14 @@ def _convert_args(c):
     g.add_argument("--to", choices=CONVERT_FORMATS, help="output format; saved next to the file")
     for f in CONVERT_FORMATS:
         g.add_argument(f"--{f}", dest="to", action="store_const", const=f, help=f"same as --to {f}")
+    c.add_argument("-c", "--codec", choices=CONVERT_CODECS,
+                   help="video codec: h264, hevc, av1 or mpeg4 for MP4; vp9, vp8 or av1 for WebM "
+                        "(default: settings, the first one ffmpeg has)")
+    c.add_argument("--size", type=parse_size, metavar="SIZE",
+                   help="aim for this file size, e.g. 8M or 500k (MP4/WebM, in two passes; without "
+                        "--width/--fps the size and frame rate are picked to fit)")
+    c.add_argument("--two-pass", action="store_true",
+                   help="encode in two passes: slower, better quality (VP8/VP9/AV1; always with --size)")
     c.add_argument("--fps", type=_ranged(int, 0, 120), help="frame rate (0 = as the source; "
                                                             "default: settings)")
     c.add_argument("--width", type=_ranged(int, 0, 16384), help="maximum width in pixels (0 = keep)")
@@ -147,6 +157,17 @@ def _crop(text):
     if w < 2 or h < 2 or x < 0 or y < 0:
         raise argparse.ArgumentTypeError(f"not an area: {text!r}")
     return x, y, w, h
+
+
+def parse_size(text):
+    """Bytes from "8", "8M", "8MB", "500k", "1.5G": decimal units, a bare number is MB."""
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmg]?)b?\s*", text, re.I)
+    if not m:
+        raise argparse.ArgumentTypeError(f"not a size: {text!r} (try 8M or 500k)")
+    n = float(m.group(1)) * {"k": 1e3, "m": 1e6, "g": 1e9, "": 1e6}[m.group(2).lower()]
+    if n < 1e4:
+        raise argparse.ArgumentTypeError(f"too small: {text!r}")
+    return int(n)
 
 
 def _ranged(kind, lo, hi):
