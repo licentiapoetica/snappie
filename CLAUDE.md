@@ -43,6 +43,11 @@ checks both installed packages before publishing. Depend on Arch's `python`
 without a minor-version cap. Unofficial packages must be rebuilt after Python
 minor upgrades because the site-packages path changes.
 
+The self-contained VCS AUR recipe is `packaging/aur/snappie-git/PKGBUILD` with
+checked-in `.SRCINFO`. It builds `snappie-git` and `snappie-purpose-git` from
+upstream master. Regenerate `.SRCINFO` after recipe changes; preview CI builds
+and installs both variants, while production tags only build release packages.
+
 Runtime deps: python3-pyqt6 (incl. QtSvg), python3-dbus, PyGObject with GStreamer +
 GLib, numpy, gstreamer `pipewiresrc` and VA plugins (`vah265enc`/`vah264enc`/`vaav1enc`,
 `vapostproc`), libwayland-client, ffmpeg (GIF/WebP),

@@ -92,6 +92,27 @@ Use a newer release or build the source with the recipe described in
 installation, `~/.local/bin/snappie` may still point to the old virtual environment;
 use `/usr/bin/snappie` to launch the pacman-managed installation.
 
+### Development package (AUR)
+
+`packaging/aur/snappie-git/` contains a self-contained AUR recipe and `.SRCINFO`
+for `snappie-git` and optional `snappie-purpose-git`. It tracks upstream `master`
+and derives its version from Git tags, revision count and commit hash. To build:
+
+```sh
+cd packaging/aur/snappie-git
+makepkg --syncdeps
+sudo pacman -U snappie-git-*.pkg.tar.zst
+# Optional KDE Share menu integration:
+sudo pacman -U snappie-purpose-git-*.pkg.tar.zst
+```
+
+These packages provide and conflict with their release counterparts. If the
+Share plugin is installed, replace or upgrade both packages in one pacman
+transaction. Run
+`makepkg` again to fetch newer upstream commits; rebuild after Python minor
+upgrades as with other unofficial Arch Python packages. AUR publication uses
+the two files in this directory; no recipe-generation script is required.
+
 ## Python package installation
 
 Snappie can also be installed as a Python package, without `install.sh` or a checkout.

@@ -13,6 +13,7 @@ on:
       - build_support.py
       - MANIFEST.in
       - packaging/arch/**
+      - packaging/aur/**
       # What the 22.04 and ARM64 builds and the installed-wheel check exercise.
       - snappie/helper/**
       - snappie/capture_helper.py
@@ -125,7 +126,7 @@ jobs:
       - name: Install Arch build tools
         run: |
           pacman -Syu --noconfirm --needed python-build python-installer python-setuptools \
-            python-wheel python-dbus cmake wayland purpose kcoreaddons qt6-base desktop-file-utils
+            python-wheel python-dbus cmake wayland purpose kcoreaddons qt6-base desktop-file-utils git
       - name: Prepare and build packages as an unprivileged user
         env:
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
@@ -143,6 +144,28 @@ jobs:
           cd /tmp
           python "$GITHUB_WORKSPACE/.github/scripts/check-arch-package.py" \
             "$GITHUB_WORKSPACE"/dist/snappie-[0-9]*.pkg.tar.zst
+      - name: Build and check the Git AUR packages
+        # Moving upstream HEAD is checked in previews, not on production release tags.
+        if: github.event_name != 'push'
+        run: |
+          cp -r packaging/aur/snappie-git /home/builder/git-package
+          chown -R builder:builder /home/builder/git-package
+          runuser -u builder -- bash -c 'cd /home/builder/git-package && makepkg --printsrcinfo' \
+            > /tmp/snappie-git.SRCINFO
+          diff -u packaging/aur/snappie-git/.SRCINFO /tmp/snappie-git.SRCINFO
+          runuser -u builder -- bash -c 'cd /home/builder/git-package && makepkg --noconfirm --cleanbuild'
+          pacman -R --noconfirm snappie-purpose snappie
+          pacman -U --noconfirm /home/builder/git-package/*.pkg.tar.zst
+          cd /tmp
+          python "$GITHUB_WORKSPACE/.github/scripts/check-arch-package.py" \
+            /home/builder/git-package/snappie-git-[0-9]*.pkg.tar.zst
+      - uses: actions/upload-artifact@v7
+        if: github.event_name != 'push'
+        with:
+          name: aur-git-x86_64
+          path: /home/builder/git-package/*.pkg.tar.zst
+          if-no-files-found: error
+          overwrite: true
       - uses: actions/upload-artifact@v7
         with:
           name: arch-x86_64

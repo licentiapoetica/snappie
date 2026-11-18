@@ -4,4 +4,5 @@ include pytest.ini requirements.txt
 recursive-include .github/scripts *.py *.sh
 recursive-include tests *.py
 recursive-include packaging/arch *.in
+recursive-include packaging/aur PKGBUILD .SRCINFO
 include docs/releasing.md
