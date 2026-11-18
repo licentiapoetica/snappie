@@ -11,15 +11,24 @@ makes the ffmpeg command line (pure, tested offline); run() runs it with progres
 - Animated WebP: ffmpeg only decodes it since 8.0 (the webp_anim decoder).  With an older ffmpeg
   the frames come from Qt's WebP plugin and are piped in as raw video at a constant rate.
 - Encoders differ per distro (Fedora's ffmpeg has no libx264, openSUSE's main repo neither), so
-  the first available one is used, down to ffmpeg's built-in mpeg4.
+  without a chosen codec the first available one is used, down to ffmpeg's built-in mpeg4.
 - When nothing about the picture changes (MKV → MP4, say), streams are copied: lossless and fast.
+- A target file size turns into a bitrate (what's left after the sound, minus a margin for the
+  container and the encoder missing a little).  Without a chosen frame rate, above 30 fps goes
+  to 30 when the full size doesn't fit; without a chosen width, the largest common size that
+  still gets enough bits per pixel for the codec is used: a small file looks better smaller than
+  blocky.  If the file still comes out too big, it's encoded once more with less.
+- Two passes: the first only analyses (to /dev/null), the second encodes with what it learned.  It
+  hits a bitrate much more exactly, and gives libvpx/libaom better quality at a given CRF too.
 """
 
+import copy
 import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 
 FORMATS = {"gif": "GIF", "webp": "WebP (animated)", "mp4": "MP4", "webm": "WebM"}
@@ -32,25 +41,46 @@ MUXER = {"gif": "gif", "webp": "webp", "mp4": "mp4", "webm": "webm"}
 
 VIDEO_ENCODERS = {"mp4": ["libx264", "libopenh264", "mpeg4"],
                   "webm": ["libvpx-vp9", "libsvtav1", "libaom-av1", "libvpx"]}
+# codecs to choose from per format (names as ffprobe reports them) → encoders, best first
+CODECS = {"mp4": {"h264": ["libx264", "libopenh264"], "hevc": ["libx265"], "av1": ["libsvtav1", "libaom-av1"],
+                  "mpeg4": ["mpeg4"]},
+          "webm": {"vp9": ["libvpx-vp9"], "vp8": ["libvpx"], "av1": ["libsvtav1", "libaom-av1"]}}
+CODEC_LABEL = {"h264": "H.264", "hevc": "HEVC", "av1": "AV1", "mpeg4": "MPEG-4", "vp9": "VP9", "vp8": "VP8"}
 AUDIO_ENCODERS = {"mp4": ["aac"], "webm": ["libopus", "libvorbis"]}
 COPY_VIDEO = {"mp4": {"h264", "hevc", "av1", "mpeg4"}, "webm": {"vp8", "vp9", "av1"}}
 COPY_AUDIO = {"mp4": {"aac", "mp3", "opus", "ac3", "eac3", "flac", "alac"}, "webm": {"opus", "vorbis"}}
 ENCODER_LABEL = {"libx264": "H.264", "libopenh264": "H.264", "mpeg4": "MPEG-4", "libvpx-vp9": "VP9",
-                 "libsvtav1": "AV1", "libaom-av1": "AV1", "libvpx": "VP8"}
+                 "libsvtav1": "AV1", "libaom-av1": "AV1", "libvpx": "VP8", "libx265": "HEVC"}
 
+# encoders ffmpeg can run in two passes (-pass; x265 through -x265-params), and those for which
+# it's worth it without a target size too (x264/x265 CRF already does what a 2nd pass would)
+TWO_PASS = {"libx264", "libx265", "libvpx", "libvpx-vp9", "libaom-av1", "libsvtav1", "mpeg4"}
+CRF_TWO_PASS = {"libvpx", "libvpx-vp9", "libaom-av1"}
+# bits per pixel per frame below which a size is too small for its bitrate (screen recordings and
+# most video still look fine there); newer codecs need fewer
+GOOD_BPP = {"libx264": 0.06, "libopenh264": 0.08, "mpeg4": 0.1, "libx265": 0.04, "libvpx": 0.07,
+            "libvpx-vp9": 0.04, "libsvtav1": 0.035, "libaom-av1": 0.035}
+FIT_FPS = 30            # a target size drops higher rates to this before it shrinks the picture
+SHORT_SIDES = (2160, 1440, 1080, 900, 720, 576, 540, 480, 360, 288, 240, 180, 144)
+MIN_VIDEO_KBPS = 40
 GIF_MAX_FPS = 50        # browsers slow down GIF frames shorter than 2/100 s
 MAX_PIECES = 100        # kept pieces × repeats: each is an ffmpeg input
 
 
 class Options:
     """What to make.  segments: [(start, end)] seconds of the source to keep (None = all);
-    crop: (x, y, w, h) in source pixels (None = all); fps/width 0 = as the source."""
+    crop: (x, y, w, h) in source pixels (None = all); fps/width 0 = as the source;
+    codec: a key of CODECS[fmt] ("" = the first one this ffmpeg can encode);
+    target_size: bytes the video should come out at (0 = go by quality; width 0 then = fit it)."""
 
     def __init__(self, fmt="mp4", fps=0, width=0, quality=80, segments=None, crop=None, speed=1.0,
-                 repeat=1, background="#ffffff", audio=True, copy=True):
+                 repeat=1, background="#ffffff", audio=True, copy=True, codec="", target_size=0,
+                 two_pass=False):
+        self.squeeze = 1.0      # < 1: the last try came out too big
         self.fmt, self.fps, self.width, self.quality = fmt, fps, width, quality
         self.segments, self.crop, self.speed, self.repeat = segments, crop, speed, repeat
-        self.background, self.audio, self.copy = background, audio, copy
+        self.background, self.audio, self.copy, self.codec = background, audio, copy, codec
+        self.target_size, self.two_pass = target_size, two_pass
 
     @classmethod
     def defaults(cls, fmt):
@@ -60,7 +90,9 @@ class Options:
             return cls(fmt, settings.get("gif.fps"), settings.get("gif.max_width"), settings.get("gif.quality"),
                        background=settings.get("convert.background"))
         return cls(fmt, settings.get("convert.video_fps"), settings.get("convert.video_max_width"),
-                   settings.get("convert.video_quality"), background=settings.get("convert.background"))
+                   settings.get("convert.video_quality"), background=settings.get("convert.background"),
+                   codec=settings.get(f"convert.{fmt}_codec") or "",
+                   two_pass=settings.get("convert.two_pass"))
 
     def save_defaults(self):
         from . import settings
@@ -69,7 +101,8 @@ class Options:
                            "convert.background": self.background})
         else:
             settings.save(**{"convert.video_fps": self.fps, "convert.video_max_width": self.width,
-                           "convert.video_quality": self.quality, "convert.background": self.background})
+                           "convert.video_quality": self.quality, "convert.background": self.background,
+                           "convert.two_pass": self.two_pass})
 
 
 class Info:
@@ -128,9 +161,10 @@ def can_decode_animated_webp():
     return "webp_anim" in _ffmpeg_list("decoders")
 
 
-def video_encoder(fmt, have=None):
+def video_encoder(fmt, have=None, codec=""):
     have = encoders() if have is None else have
-    return next((e for e in VIDEO_ENCODERS.get(fmt, []) if e in have), None)
+    choices = CODECS.get(fmt, {}).get(codec, []) if codec else VIDEO_ENCODERS.get(fmt, [])
+    return next((e for e in choices if e in have), None)
 
 
 def audio_encoder(fmt, have=None):
@@ -138,12 +172,17 @@ def audio_encoder(fmt, have=None):
     return next((e for e in AUDIO_ENCODERS.get(fmt, []) if e in have), None)
 
 
-def missing_encoder(fmt, have=None):
-    """Why this format can't be made with this ffmpeg, or ""."""
+def missing_encoder(fmt, have=None, codec=""):
+    """Why this format (and codec) can't be made with this ffmpeg, or ""."""
     have = encoders() if have is None else have
     if fmt == "webp" and "libwebp_anim" not in have:
         return "Your ffmpeg has no WebP encoder (libwebp)."
-    if fmt in VIDEO_FORMATS and not video_encoder(fmt, have):
+    if fmt in VIDEO_FORMATS and codec and codec not in CODECS[fmt]:
+        return f"{fmt.upper()} can't hold {CODEC_LABEL.get(codec, codec)}; choose one of " \
+               f"{', '.join(CODEC_LABEL[k] for k in CODECS[fmt])}."
+    if fmt in VIDEO_FORMATS and not video_encoder(fmt, have, codec):
+        if codec:
+            return f"Your ffmpeg has no {CODEC_LABEL[codec]} encoder ({' or '.join(CODECS[fmt][codec])})."
         return f"Your ffmpeg has no {fmt.upper()} video encoder."
     return ""
 
@@ -273,22 +312,26 @@ def out_duration(info, opts):
     return sum(e - s for s, e in kept(info, opts)) * max(1, opts.repeat) / (opts.speed or 1)
 
 
-def out_size(info, opts):
-    """Output width × height: crop, then scale down to opts.width; even for the video encoders."""
+def out_size(info, opts, have=None):
+    """Output width × height: crop, then scale down to opts.width (or, with a target size and no
+    width, to what fits it); even for the video encoders."""
     w, h = (opts.crop[2], opts.crop[3]) if opts.crop else (info.width, info.height)
-    if opts.width and opts.width < w:
-        w, h = opts.width, h * opts.width / w
+    width = opts.width or fit_width(info, opts, have)
+    if width and width < w:
+        w, h = width, h * width / w
     w, h = max(2, int(round(w))), max(2, int(round(h)))
     if opts.fmt in VIDEO_FORMATS:
         w, h = max(2, w // 2 * 2), max(2, h // 2 * 2)
     return w, h
 
 
-def out_fps(info, opts):
+def out_fps(info, opts, have=None):
     """The fps filter's rate, or 0 to keep the source timing."""
     cap = GIF_MAX_FPS if opts.fmt == "gif" else 120
     if opts.fps:
         return min(opts.fps, cap)
+    if fit_fps(info, opts, have):
+        return FIT_FPS
     if info.fps > cap:
         return cap
     return 0
@@ -296,14 +339,102 @@ def out_fps(info, opts):
 
 def can_copy(info, opts):
     """True if the streams can be copied as they are (a container change only)."""
-    if not opts.copy or info.image or opts.fmt not in VIDEO_FORMATS:
+    if not opts.copy or info.image or opts.fmt not in VIDEO_FORMATS or opts.target_size:
         return False
-    if info.vcodec not in COPY_VIDEO[opts.fmt]:
+    if info.vcodec not in COPY_VIDEO[opts.fmt] or (opts.codec and info.vcodec != opts.codec):
         return False
     whole = is_whole(info, opts)
     same_size = not opts.crop and (not opts.width or opts.width >= info.width)
     same_rate = not opts.fps or abs(opts.fps - info.fps) < 0.01
     return whole and same_size and same_rate and opts.speed == 1 and opts.repeat <= 1
+
+
+# -- target file size
+
+def frame_rate(info, opts, have=None):
+    """Frames per second of the output (for bitrate math)."""
+    return out_fps(info, opts, have) or _source_rate(info, opts)
+
+
+def _source_rate(info, opts):
+    return min(120, (info.fps or 30) * (opts.speed or 1))
+
+
+def _pixel_budget(info, opts, have, fps):
+    """Pixels per frame the target size pays for at this rate, or None without a target."""
+    try:
+        rates = target_bitrates(info, opts, have)
+    except RuntimeError:
+        return None
+    if not rates:
+        return None
+    video = rates[0] / opts.squeeze     # a retry squeezes the bitrate, not the size
+    return video * 1000 / fps / GOOD_BPP.get(video_encoder(opts.fmt, have, opts.codec), 0.06)
+
+
+def fit_fps(info, opts, have=None):
+    """True if a target size should drop the frame rate to FIT_FPS: no rate chosen, a faster
+    source, and the full size doesn't fit at its own rate."""
+    if not opts.target_size or opts.fps or opts.fmt not in VIDEO_FORMATS:
+        return False
+    rate = _source_rate(info, opts)
+    budget = _pixel_budget(info, opts, have, rate)
+    w, h = (opts.crop[2], opts.crop[3]) if opts.crop else (info.width, info.height)
+    return rate > FIT_FPS + 0.5 and budget is not None and w * h > budget
+
+
+def two_passes(info, opts, have=None):
+    """True if this conversion runs in two passes."""
+    if not opts.two_pass or opts.fmt not in VIDEO_FORMATS or can_copy(info, opts):
+        return False
+    enc = video_encoder(opts.fmt, have, opts.codec)
+    return enc in TWO_PASS and (bool(opts.target_size) or enc in CRF_TWO_PASS)
+
+
+def audio_kbps(total_kbps):
+    """Sound bitrate for a file of this total bitrate: less for small files, where every bit counts."""
+    for floor, kbps in ((2000, 160), (1000, 128), (500, 96), (200, 64)):
+        if total_kbps >= floor:
+            return kbps
+    return 48
+
+
+def target_bitrates(info, opts, have=None):
+    """(video, audio) kbit/s that make opts.target_size, or None without one.  RuntimeError if
+    the length is unknown or the size too small for it."""
+    if not opts.target_size or opts.fmt not in VIDEO_FORMATS:
+        return None
+    dur = out_duration(info, opts)
+    if not dur:
+        raise RuntimeError("Can't aim for a file size: the length of this video is unknown.")
+    margin = 0.97 if two_passes(info, opts, have) else 0.93    # container, and the encoder missing a little
+    total = opts.target_size * 8 / dur / 1000 * margin
+    sound = audio_kbps(total) if _keeps_audio(info, opts) else 0
+    video = (total - sound) * opts.squeeze
+    if video < MIN_VIDEO_KBPS:
+        need = (MIN_VIDEO_KBPS + audio_kbps(MIN_VIDEO_KBPS) * bool(sound)) * 1000 * dur / 8 / margin
+        raise RuntimeError(f"{format_size(opts.target_size)} is too small for {dur:.0f} s of video; "
+                           f"it needs at least {format_size(need)}.")
+    return video, sound
+
+
+def fit_width(info, opts, have=None):
+    """The width that suits the target size: the largest common size (by the short side) with
+    enough bits per pixel for the codec.  0 without a target size or when the full size fits."""
+    budget = _pixel_budget(info, opts, have, frame_rate(info, opts, have))
+    w, h = (opts.crop[2], opts.crop[3]) if opts.crop else (info.width, info.height)
+    if budget is None or w * h <= budget:
+        return 0
+    short = min(w, h)
+    sides = [s for s in SHORT_SIDES if s < short] or [short]
+    side = next((s for s in sides if w * h * (s / short) ** 2 <= budget), sides[-1])
+    return max(2, int(round(w * side / short / 2)) * 2)
+
+
+def format_size(n):
+    if n >= 1e6:
+        return f"{n / 1e6:.{2 if n < 1e7 else 1}f} MB"
+    return f"{n / 1e3:.0f} kB"
 
 
 # -- quality: one 1–100 scale for every encoder (80 is the default everywhere)
@@ -316,6 +447,8 @@ def video_quality_args(enc, q, size, fps):
     bitrate = f"{max(100, int(size[0] * size[1] * (fps or 30) * (0.02 + 0.13 * q / 100) / 1000))}k"
     if enc == "libx264":
         return ["-crf", str(round(51 - q * 0.35)), "-preset", "medium"]
+    if enc == "libx265":        # its CRF scale sits ~5 above x264's for the same look
+        return ["-crf", str(round(55 - q * 0.35)), "-preset", "medium"]
     if enc == "libvpx-vp9":
         return ["-crf", str(round(63 - q * 0.4)), "-b:v", "0", "-row-mt", "1", "-deadline", "good",
                 "-cpu-used", "4"]
@@ -330,12 +463,32 @@ def video_quality_args(enc, q, size, fps):
     return ["-b:v", bitrate]       # libopenh264: bitrate only
 
 
-def describe_quality(fmt, q, have=None):
+def video_bitrate_args(enc, kbps):
+    """Average bitrate instead of a quality: for a target size."""
+    b = ["-b:v", f"{max(1, int(kbps))}k"]
+    if enc in ("libx264", "libx265"):
+        return b + ["-preset", "medium"]
+    if enc == "libvpx-vp9":
+        return b + ["-row-mt", "1", "-deadline", "good", "-cpu-used", "4"]
+    if enc == "libsvtav1":
+        return b + ["-preset", "8"]
+    if enc == "libaom-av1":
+        return b + ["-cpu-used", "6", "-row-mt", "1"]
+    return b
+
+
+def pass_args(enc, n, log):
+    if enc == "libx265":
+        return ["-x265-params", f"log-level=error:pass={n}:stats={log}.x265"]
+    return ["-pass", str(n), "-passlogfile", log]
+
+
+def describe_quality(fmt, q, have=None, codec=""):
     if fmt == "gif":
         return f"{gif_colors(q)} colors"
     if fmt == "webp":
         return "lossless" if q >= 100 else f"quality {q}"
-    enc = video_encoder(fmt, have)
+    enc = video_encoder(fmt, have, codec)
     return f"{ENCODER_LABEL.get(enc, enc or '?')}, quality {q}"
 
 
@@ -353,18 +506,30 @@ def _atempo(speed):
     return ",".join(out)
 
 
-def build(info, out_path, opts, have=None):
+def commands(info, out_path, opts, log, have=None):
+    """The ffmpeg argvs to run in turn: one, or two for two passes (`log`: the pass log prefix)."""
+    if two_passes(info, opts, have):
+        return [build(info, out_path, opts, have, 1, log), build(info, out_path, opts, have, 2, log)]
+    return [build(info, out_path, opts, have)]
+
+
+def _keeps_audio(info, opts):
+    return opts.fmt in VIDEO_FORMATS and info.has_audio and opts.audio and not info.piped
+
+
+def build(info, out_path, opts, have=None, pass_no=0, log=None):
     """ffmpeg argv (without "ffmpeg") for this conversion.  With info.piped the caller writes raw
-    RGBA frames (feed()) to stdin."""
+    RGBA frames (feed()) to stdin.  pass_no 1/2 with `log` make one of two passes; the first
+    writes nothing but the log."""
     have = encoders() if have is None else have
     fmt = opts.fmt
     if fmt not in FORMATS:
         raise RuntimeError(f"Unknown format: {fmt}")
-    why = missing_encoder(fmt, have)
+    why = missing_encoder(fmt, have, opts.codec if fmt in VIDEO_FORMATS else "")
     if why:
         raise RuntimeError(why)
-    video_out = fmt in VIDEO_FORMATS
-    audio = video_out and info.has_audio and opts.audio and not info.piped
+    audio = _keeps_audio(info, opts) and pass_no != 1
+    rates = target_bitrates(info, opts, have)
     args = ["-y", "-v", "error", "-nostdin"] if not info.piped else ["-y", "-v", "error"]
 
     if can_copy(info, opts):
@@ -385,7 +550,7 @@ def build(info, out_path, opts, have=None):
     if not pieces:
         raise RuntimeError("Nothing left to convert: every part was cut.")
     if info.piped:
-        rate = feed_rate(info, opts)
+        rate = feed_rate(info, opts, have)
         args += ["-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{info.width}x{info.height}", "-r", f"{rate:g}",
                  "-i", "pipe:0"]
         pieces = [None]
@@ -409,13 +574,13 @@ def build(info, out_path, opts, have=None):
     chain = []
     if opts.speed != 1:
         chain.append(f"setpts=PTS/{opts.speed:.6g}")
-    fps = out_fps(info, opts)
+    fps = out_fps(info, opts, have)
     if fps:
         chain.append(f"fps={fps:g}")
     if opts.crop:
         x, y, w, h = (int(round(c)) for c in opts.crop)
         chain.append(f"crop={w}:{h}:{x}:{y}")
-    w, h = out_size(info, opts)
+    w, h = out_size(info, opts, have)
     cw, ch = (int(round(opts.crop[2])), int(round(opts.crop[3]))) if opts.crop else (info.width, info.height)
     if (w, h) != (cw, ch):
         chain.append(f"scale={w}:{h}:flags=lanczos")
@@ -451,12 +616,23 @@ def build(info, out_path, opts, have=None):
         args += ["-c:v", "libwebp_anim", "-lossless", str(int(lossless)), "-quality",
                  str(100 if lossless else opts.quality), "-compression_level", "4", "-loop", "0", "-an"]
     else:
-        enc = video_encoder(fmt, have)
-        args += ["-c:v", enc] + video_quality_args(enc, opts.quality, (w, h), fps or info.fps)
+        enc = video_encoder(fmt, have, opts.codec)
+        if rates:
+            args += ["-c:v", enc] + video_bitrate_args(enc, rates[0])
+        else:
+            args += ["-c:v", enc] + video_quality_args(enc, opts.quality, (w, h), fps or info.fps)
+        if pass_no:
+            args += pass_args(enc, pass_no, log)
+        elif enc == "libx265":
+            args += ["-x265-params", "log-level=error"]
+        if enc == "libx265" and fmt == "mp4":
+            args += ["-tag:v", "hvc1"]      # Apple players want this tag for HEVC in MP4
         if info.image or info.piped:
             args += ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
+        if pass_no == 1:
+            return args + ["-an", "-f", "null", os.devnull]
         if audio:
-            args += ["-map", "[aout]"] + _audio_args(fmt, have)
+            args += ["-map", "[aout]"] + _audio_args(fmt, have, rates[1] if rates else 160, bool(rates))
         else:
             args += ["-an"]
         if fmt == "mp4":
@@ -464,17 +640,18 @@ def build(info, out_path, opts, have=None):
     return args + ["-f", MUXER[fmt], out_path]
 
 
-def _audio_args(fmt, have):
+def _audio_args(fmt, have, kbps=160, exact=False):
     enc = audio_encoder(fmt, have)
     if not enc:
         return ["-an"]
-    return ["-c:a", enc, "-b:a", "160k"]
+    exact = exact and enc == "libopus"      # Opus' default VBR can run 20 % over (on a plain tone)
+    return ["-c:a", enc, "-b:a", f"{kbps}k"] + (["-vbr", "constrained"] if exact else [])
 
 
 # -- raw frames for the Qt fallback
 
-def feed_rate(info, opts):
-    return out_fps(info, opts) or min(GIF_MAX_FPS, max(1, round(info.fps or 10)))
+def feed_rate(info, opts, have=None):
+    return out_fps(info, opts, have) or min(GIF_MAX_FPS, max(1, round(info.fps or 10)))
 
 
 def feed(frames, segments, repeat, rate, write):
@@ -562,7 +739,27 @@ def run(src, out_path, opts, info=None, progress=None, cancel=None):
     info = info or probe(src)
     folder = os.path.dirname(os.path.abspath(out_path))
     tmp = os.path.join(folder, "." + os.path.basename(out_path) + ".part")
-    args = build(info, tmp, opts)
+    logs = tempfile.mkdtemp(prefix="snappie-passes-")
+    try:
+        for attempt in range(2):
+            cmds = commands(info, tmp, opts, os.path.join(logs, "pass"))
+            for n, args in enumerate(cmds):
+                part = (lambda f, n=n: progress((n + f) / len(cmds))) if progress else None
+                _run_ffmpeg(args, info, opts, part, cancel)
+            size = os.path.getsize(tmp)
+            if not opts.target_size or size <= opts.target_size or attempt:
+                break
+            opts = copy.copy(opts)      # too big: once more, with that much less for the video
+            opts.squeeze *= opts.target_size / size * 0.97
+        os.replace(tmp, out_path)
+        return out_path
+    finally:
+        shutil.rmtree(logs, ignore_errors=True)
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def _run_ffmpeg(args, info, opts, progress, cancel):
     total = out_duration(info, opts) or 0
     proc = subprocess.Popen(["ffmpeg", "-progress", "pipe:1", "-nostats", *args],
                             stdin=subprocess.PIPE if info.piped else subprocess.DEVNULL,
@@ -585,14 +782,10 @@ def run(src, out_path, opts, info=None, progress=None, cancel=None):
         if code != 0:
             text = (err[0] if err else b"").decode(errors="replace").strip().splitlines()
             raise RuntimeError("ffmpeg failed: " + (text[-1] if text else f"exit code {code}"))
-        os.replace(tmp, out_path)
-        return out_path
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
-        if os.path.exists(tmp):
-            os.unlink(tmp)
 
 
 def _pipe_frames(proc, info, opts):

@@ -334,6 +334,22 @@ notification area.
   a background color (white by default).
 - **Remove black bars** finds letterbox or pillarbox bars and crops them off.
 - **Repeat** plays a short clip several times in a row in the video.
+- **Codec** picks the video codec: H.264, HEVC, AV1 or MPEG-4 for MP4, and
+  VP9, VP8 or AV1 for WebM. VP8 is older and makes bigger files, but even old
+  players and browsers play it. **Automatic** copies the video when it can and
+  otherwise uses the best encoder your ffmpeg has. The window remembers your
+  choice for each format.
+- **File size** aims for a size, like 8 MB for a chat app's upload limit.
+  Snappie works out the bitrate and leaves room for the sound. If the full
+  picture doesn't fit well in that, it lowers the frame rate to 30 fps first,
+  then picks the largest size that still looks clean (720p, 480p, …). The
+  window shows what it chose, and you can still set the width or frame rate
+  yourself. If a file still comes out too big, it's made once more with less.
+  1 MB is 1,000,000 bytes, so it also fits limits counted in MiB.
+- **Two passes** looks at the whole video first, then encodes it. It's slower,
+  but hits a file size exactly and uses the bits better. It's ticked for you
+  with a file size. Without one, it helps VP8, VP9 and AV1 (libaom); H.264 and
+  HEVC look the same either way. OpenH264 can't do it.
 - One quality scale (1–100) for every format: 80 is the default, and 100 makes
   a lossless WebP.
 - Defaults for GIF / WebP and for videos are in Settings → GIF & Convert, or
@@ -346,12 +362,16 @@ snappie convert --mp4 clip.gif                       # GIF → MP4
 snappie convert --gif --fps 12 --width 640 demo.mkv  # video → small GIF
 snappie convert --mp4 --start 0:05 --end 1:30 --cut 0:40-0:52 talk.mkv
 snappie convert --webm --crop auto --speed 1.5 movie.mp4
+snappie convert --webm -c vp8 clip.mkv               # WebM with VP8 instead of VP9
+snappie convert --mp4 --size 8M recording.mkv        # fit in 8 MB
 ```
 
-`--crop W:H:X:Y` keeps an area (`auto` removes black bars), `--repeat N` plays
-it N times, `--background '#000000'` sets the color behind transparency,
-`--no-audio` drops the sound, `--reencode` never copies, and `-o FILE` picks
-the output. Without `-o`, the result goes next to the source and never
+`-c CODEC` picks the video codec (`h264`, `hevc`, `av1`, `mpeg4`, `vp9`,
+`vp8`). `--size 8M` aims for a file size (also `500k` or `1.5G`), always in two
+passes, and `--two-pass` uses two passes without one. `--crop W:H:X:Y` keeps an
+area (`auto` removes black bars), `--repeat N` plays it N times, `--background
+'#000000'` sets the color behind transparency, `--no-audio` drops the sound,
+`--reencode` never copies, and `-o FILE` picks the output. Without `-o`, the result goes next to the source and never
 overwrites a file.
 
 Snappie uses the encoders your ffmpeg has. If H.264 (libx264) is missing,

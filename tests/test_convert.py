@@ -6,7 +6,8 @@ import pytest
 
 from snappie import convert as c
 
-ALL = {"libx264", "libopenh264", "mpeg4", "libvpx-vp9", "libsvtav1", "libvpx", "libwebp_anim", "aac", "libopus"}
+ALL = {"libx264", "libopenh264", "mpeg4", "libvpx-vp9", "libsvtav1", "libvpx", "libwebp_anim", "aac", "libopus",
+       "libx265"}
 
 
 def video(**kw):
@@ -200,3 +201,118 @@ def test_run_gif_to_mp4_with_cuts(tmp_path):
     out = c.run(src, c.output_path(src, "mp4"), o, info)
     assert os.path.exists(out) and not [f for f in os.listdir(tmp_path) if f.endswith(".part")]
     assert c.probe(out).duration == pytest.approx(1.5, abs=0.15)
+
+
+def vcodec(args):
+    return args[args.index("-c:v") + 1]
+
+
+def test_chosen_codec_picks_its_encoder():
+    assert vcodec(c.build(video(), "/o.webm", c.Options("webm", codec="vp8"), ALL)) == "libvpx"
+    assert vcodec(c.build(video(), "/o.webm", c.Options("webm", codec="av1"), ALL)) == "libsvtav1"
+    assert vcodec(c.build(video(), "/o.webm", c.Options("webm"), ALL)) == "libvpx-vp9"     # automatic
+    args = c.build(video(), "/o.mp4", c.Options("mp4", codec="hevc", copy=False), ALL)
+    assert vcodec(args) == "libx265" and "hvc1" in args
+    assert vcodec(c.build(video(), "/o.mp4", c.Options("mp4", codec="h264", copy=False),
+                          ALL - {"libx264"})) == "libopenh264"
+    assert c.describe_quality("webm", 80, ALL, "vp8") == "VP8, quality 80"
+
+
+def test_chosen_codec_copies_only_its_own_streams():
+    assert c.can_copy(video(vcodec="vp9"), c.Options("webm"))
+    assert not c.can_copy(video(vcodec="vp9"), c.Options("webm", codec="vp8"))
+    assert c.can_copy(video(vcodec="vp8"), c.Options("webm", codec="vp8"))
+    assert c.can_copy(video(vcodec="hevc"), c.Options("mp4", codec="hevc"))
+
+
+def test_chosen_codec_missing_or_wrong_for_the_format():
+    assert "VP8" in c.missing_encoder("webm", ALL - {"libvpx"}, "vp8")
+    assert "can't hold VP8" in c.missing_encoder("mp4", ALL, "vp8")
+    with pytest.raises(RuntimeError, match="no HEVC encoder"):
+        c.build(video(), "/o.mp4", c.Options("mp4", codec="hevc", copy=False), ALL - {"libx265"})
+    assert c.missing_encoder("webm", ALL, "vp8") == ""
+
+
+def test_target_size_sets_bitrates_and_never_copies():
+    o = c.Options("mp4", target_size=8_000_000, two_pass=True)
+    video_kbps, audio_kbps = c.target_bitrates(video(), o, ALL)          # 10 s: plenty
+    assert audio_kbps == 160 and video_kbps == pytest.approx(8e6 * 8 / 10 / 1000 * 0.97 - 160)
+    assert not c.can_copy(video(), o)
+    assert c.target_bitrates(video(), c.Options("mp4"), ALL) is None
+    assert c.target_bitrates(video(), c.Options("gif", target_size=8_000_000), ALL) is None
+    assert c.target_bitrates(video(), c.Options("mp4", target_size=8_000_000, audio=False), ALL)[1] == 0
+    args = c.build(video(), "/o.webm", c.Options("webm", target_size=1_000_000), ALL)
+    assert "-crf" not in args and args[args.index("-b:a") + 1] == "96k" and "constrained" in args
+    with pytest.raises(RuntimeError, match="too small for 10 s.*at least"):
+        c.target_bitrates(video(), c.Options("mp4", target_size=20_000), ALL)
+    with pytest.raises(RuntimeError, match="unknown"):
+        c.target_bitrates(video(duration=0), c.Options("mp4", target_size=8_000_000), ALL)
+
+
+def test_target_size_picks_frame_rate_and_size():
+    long60 = video(duration=60.0, fps=60.0)
+    o = c.Options("mp4", target_size=8_000_000, two_pass=True)
+    assert c.fit_fps(long60, o, ALL) and c.out_fps(long60, o, ALL) == 30
+    assert c.out_size(long60, o, ALL) == (854, 480)
+    args = c.build(long60, "/o.mp4", o, ALL)
+    assert "fps=30" in graph(args) and "scale=854:480" in graph(args)
+    assert c.out_size(long60, c.Options("mp4", target_size=8_000_000, codec="av1", two_pass=True), ALL)[1] > 480
+    # what the user chose stays
+    assert c.out_size(long60, c.Options("mp4", target_size=8_000_000, width=1280), ALL) == (1280, 720)
+    assert c.out_fps(long60, c.Options("mp4", target_size=8_000_000, fps=60), ALL) == 60
+    # a size that fits keeps everything
+    big = c.Options("mp4", target_size=100_000_000)
+    assert c.out_size(long60, big, ALL) == (1920, 1080) and c.out_fps(long60, big, ALL) == 0
+
+
+def test_two_passes():
+    o = c.Options("mp4", target_size=8_000_000, two_pass=True)
+    first, second = c.commands(video(), "/o.mp4", o, "/tmp/log", ALL)
+    assert first[first.index("-pass") + 1] == "1" and first[-4:] == ["-an", "-f", "null", os.devnull]
+    assert "-map" in first and "[aout]" not in first and "[aout]" not in graph(first)
+    assert second[second.index("-pass") + 1] == "2" and "/tmp/log" in second and second[-1] == "/o.mp4"
+    assert "[aout]" in second
+    x265 = c.commands(video(), "/o.mp4", c.Options("mp4", codec="hevc", target_size=8_000_000, two_pass=True),
+                      "/tmp/log", ALL)
+    assert [a[a.index("-x265-params") + 1] for a in x265] == [
+        "log-level=error:pass=1:stats=/tmp/log.x265", "log-level=error:pass=2:stats=/tmp/log.x265"]
+    # one pass: not asked, OpenH264 can't, x264 by quality gains nothing, copying needs none
+    assert len(c.commands(video(), "/o.mp4", c.Options("mp4", target_size=8_000_000), "/l", ALL)) == 1
+    assert len(c.commands(video(), "/o.mp4", c.Options("mp4", target_size=8_000_000, two_pass=True), "/l",
+                          ALL - {"libx264"})) == 1
+    assert len(c.commands(video(), "/o.mp4", c.Options("mp4", copy=False, two_pass=True), "/l", ALL)) == 1
+    assert len(c.commands(video(vcodec="vp9"), "/o.webm", c.Options("webm", two_pass=True), "/l", ALL)) == 1
+    assert len(c.commands(video(), "/o.webm", c.Options("webm", two_pass=True), "/l", ALL)) == 2   # VP9 CRF
+
+
+@pytest.mark.skipif(not c.available(), reason="needs ffmpeg")
+def test_run_hits_the_target_size_in_two_passes(tmp_path):
+    if "libx264" not in c.encoders():
+        pytest.skip("no libx264")
+    src = str(tmp_path / "a.mkv")
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=4", "-f", "lavfi",
+                    "-i", "sine=d=4", "-shortest", "-c:v", "libx264", "-crf", "10", src], check=True)
+    o = c.Options("mp4", codec="h264", target_size=300_000, two_pass=True)
+    out = c.run(src, str(tmp_path / "o.mp4"), o, c.probe(src))
+    assert 0.85 * 300_000 < os.path.getsize(out) <= 300_000
+    assert not [f for f in os.listdir(tmp_path) if "log" in f or f.endswith(".part")]
+
+
+def test_run_retries_once_when_the_file_comes_out_too_big(tmp_path, monkeypatch):
+    src = tmp_path / "a.mkv"
+    src.write_bytes(b"")
+    runs = []
+
+    def fake(args, info, opts, progress, cancel):        # 10 % over the bitrate, every time
+        runs.append(opts.squeeze)
+        if args[-1] != os.devnull:
+            kbps = c.target_bitrates(info, opts, ALL)[0] + 160
+            with open(args[-1], "wb") as f:
+                f.write(b"x" * int(kbps * 1000 / 8 * info.duration * 1.1))
+    monkeypatch.setattr(c, "_run_ffmpeg", fake)
+    monkeypatch.setattr(c, "available", lambda: True)
+    monkeypatch.setattr(c, "encoders", lambda: ALL)
+    o = c.Options("mp4", target_size=8_000_000, two_pass=True)
+    out = c.run(str(src), str(tmp_path / "o.mp4"), o, video(path=str(src)))
+    assert len(runs) == 4 and runs[0] == runs[1] == 1 and runs[2] < 0.95      # 2 passes, twice
+    assert os.path.getsize(out) <= 8_000_000 and o.squeeze == 1                 # the caller's opts untouched

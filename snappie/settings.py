@@ -64,6 +64,9 @@ DEFAULTS = {
     "convert.video_max_width": 0,         # 0 = keep the width
     "convert.video_quality": 80,          # 1–100, mapped to each encoder's CRF / quality scale
     "convert.background": "#ffffff",      # behind transparent GIF/WebP frames in MP4/WebM
+    "convert.mp4_codec": "",              # h264 | hevc | av1 | mpeg4; "" = copy, or the best there is
+    "convert.webm_codec": "",             # vp9 | vp8 | av1; "" = as above
+    "convert.two_pass": False,            # analyse, then encode (with a target size; VP8/VP9/libaom AV1)
     "convert.last_format": "",            # the convert dialog's last choice ("" = by the source)
 
     "dolphin_menu": True,                 # Snappie submenu in Dolphin's right-click menu
