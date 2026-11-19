@@ -62,17 +62,21 @@ if action in ("create", "upload") and os.environ.get("FAKE_UPLOAD_FAIL"):
     gh.chmod(0o755)
     dist = tmp_path / "dist"
     dist.mkdir()
-    for name in ("test-x86_64.whl", "test-aarch64.whl", "test.tar.gz", "SHA256SUMS"):
+    for name in ("test-x86_64.whl", "test-aarch64.whl", "test.tar.gz", "SHA256SUMS",
+                 "snappie-0.1.0-1-x86_64.pkg.tar.zst", "snappie-purpose-0.1.0-1-x86_64.pkg.tar.zst"):
         (dist / name).touch()
     log = tmp_path / "calls"
 
-    def run(state="missing", latest="missing", tag="v0.1.0", prerelease=False, fail_upload=False):
+    def run(state="missing", latest="missing", tag="v0.1.0", prerelease=False, fail_upload=False,
+            missing_arch=None):
         path = f"{binaries}:{Path(sys.executable).parent}:{os.environ['PATH']}"
         env = dict(os.environ, PATH=path, GH_CALLS=str(log),
                    FAKE_GH_STATE=state, FAKE_GH_LATEST=latest, RELEASE_TAG=tag,
                    RELEASE_PRERELEASE=str(prerelease).lower())
         if fail_upload:
             env["FAKE_UPLOAD_FAIL"] = "1"
+        if missing_arch:
+            (dist / missing_arch).unlink()
         log.write_text("")
         result = subprocess.run(["bash", str(SCRIPTS / "publish-release.sh")], cwd=tmp_path,
                                 env=env, capture_output=True, text=True)
@@ -93,6 +97,8 @@ def test_publishes_only_after_assets_are_uploaded(publisher):
     assert "--draft" in calls[1] and "--verify-tag" in calls[1]
     assert "dist/test-x86_64.whl" in calls[1] and "dist/test-aarch64.whl" in calls[1]
     assert "dist/SHA256SUMS" in calls[1]
+    assert "dist/snappie-0.1.0-1-x86_64.pkg.tar.zst" in calls[1]
+    assert "dist/snappie-purpose-0.1.0-1-x86_64.pkg.tar.zst" in calls[1]
     assert "--draft=false" in calls[-1] and "--latest=true" in calls[-1]
 
 
@@ -124,6 +130,14 @@ def test_published_releases_are_preserved(publisher):
     assert result.returncode != 0
     assert "already published" in result.stderr
     assert actions(calls) == ["view"]
+
+
+@pytest.mark.parametrize("missing", ["snappie-0.1.0-1-x86_64.pkg.tar.zst",
+                                   "snappie-purpose-0.1.0-1-x86_64.pkg.tar.zst"])
+def test_missing_arch_artifact_does_not_start_publication(publisher, missing):
+    result, calls = publisher(missing_arch=missing)
+    assert result.returncode != 0
+    assert calls == []
 
 
 def test_lookup_errors_are_not_mistaken_for_a_missing_release(publisher):

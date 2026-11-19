@@ -12,6 +12,8 @@ on:
       - pyproject.toml
       - build_support.py
       - MANIFEST.in
+      - packaging/arch/**
+      - packaging/aur/**
       # What the 22.04 and ARM64 builds and the installed-wheel check exercise.
       - snappie/helper/**
       - snappie/capture_helper.py
@@ -111,9 +113,69 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+  arch:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: source
+          path: source
+      - name: Install Arch build tools
+        run: |
+          pacman -Syu --noconfirm --needed python-build python-installer python-setuptools \
+            python-wheel python-dbus cmake wayland purpose kcoreaddons qt6-base desktop-file-utils git
+      - name: Prepare and build packages as an unprivileged user
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          useradd --create-home builder
+          python .github/scripts/prepare-arch-package.py source/*.tar.gz \
+            /home/builder/package --version "$RELEASE_VERSION"
+          chown -R builder:builder /home/builder/package
+          runuser -u builder -- bash -c 'cd /home/builder/package && makepkg --noconfirm --cleanbuild'
+          mkdir -p dist
+          cp /home/builder/package/*.pkg.tar.zst dist/
+      - name: Install and check both packages
+        run: |
+          pacman -U --noconfirm dist/*.pkg.tar.zst
+          cd /tmp
+          python "$GITHUB_WORKSPACE/.github/scripts/check-arch-package.py" \
+            "$GITHUB_WORKSPACE"/dist/snappie-[0-9]*.pkg.tar.zst
+      - name: Build and check the Git AUR packages
+        # Moving upstream HEAD is checked in previews, not on production release tags.
+        if: github.event_name != 'push'
+        run: |
+          cp -r packaging/aur/snappie-git /home/builder/git-package
+          chown -R builder:builder /home/builder/git-package
+          runuser -u builder -- bash -c 'cd /home/builder/git-package && makepkg --printsrcinfo' \
+            > /tmp/snappie-git.SRCINFO
+          diff -u packaging/aur/snappie-git/.SRCINFO /tmp/snappie-git.SRCINFO
+          runuser -u builder -- bash -c 'cd /home/builder/git-package && makepkg --noconfirm --cleanbuild'
+          pacman -R --noconfirm snappie-purpose snappie
+          pacman -U --noconfirm /home/builder/git-package/*.pkg.tar.zst
+          cd /tmp
+          python "$GITHUB_WORKSPACE/.github/scripts/check-arch-package.py" \
+            /home/builder/git-package/snappie-git-[0-9]*.pkg.tar.zst
+      - uses: actions/upload-artifact@v7
+        if: github.event_name != 'push'
+        with:
+          name: aur-git-x86_64
+          path: /home/builder/git-package/*.pkg.tar.zst
+          if-no-files-found: error
+          overwrite: true
+      - uses: actions/upload-artifact@v7
+        with:
+          name: arch-x86_64
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error
+          overwrite: true
+
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [version, tests, build]
+    needs: [version, tests, build, arch]
     runs-on: ubuntu-22.04
     # The Latest lookup and update must not overlap across different release tags.
     concurrency:
@@ -137,9 +199,13 @@ jobs:
         with:
           name: source
           path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: arch-x86_64
+          path: dist
       - name: Create checksums
         working-directory: dist
-        run: sha256sum *.whl *.tar.gz > SHA256SUMS
+        run: sha256sum *.whl *.tar.gz *.pkg.tar.zst > SHA256SUMS
       - name: Publish completed release
         env:
           GH_TOKEN: ${{ github.token }}

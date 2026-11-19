@@ -1,0 +1,61 @@
+# Rendered by .github/scripts/prepare-arch-package.py with the release source hash.
+pkgbase=snappie
+pkgname=(snappie snappie-purpose)
+pkgver=@PKGVER@
+epoch=@EPOCH@
+pkgrel=1
+pkgdesc='Screenshots, annotation, recording and sharing for KDE Plasma on Wayland'
+arch=(x86_64)
+url='https://github.com/licentiapoetica/snappie'
+license=(MIT)
+makedepends=(python-build python-installer python-setuptools python-wheel python-dbus
+             cmake wayland purpose kcoreaddons qt6-base desktop-file-utils)
+options=('!debug')
+_source_version=@SOURCE_VERSION@
+source=("https://github.com/licentiapoetica/snappie/releases/download/v${_source_version}/snappie-${_source_version}.tar.gz")
+sha256sums=('@SOURCE_SHA256@')
+
+build() {
+    cd "$srcdir/snappie-$_source_version"
+    python -m build --wheel --no-isolation
+    cmake -S snappie/purpose -B build-purpose \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build-purpose
+}
+
+package_snappie() {
+    depends=(python python-pyqt6 qt6-svg python-dbus
+             python-gobject python-numpy python-requests gstreamer gst-plugin-pipewire
+             gst-plugins-base gst-plugins-good gst-plugins-bad-libs ffmpeg wayland
+             'kwin>=6' kglobalacceld kservice)
+    optdepends=('gst-plugin-va: hardware video encoding'
+                'python-evdev: clicks and keys in recordings'
+                'tesseract: text recognition (also install your language data)'
+                'pipewire: selecting which apps to record audio from'
+                'openssh: SFTP uploads'
+                'snappie-purpose: KDE Share menu integration')
+
+    cd "$srcdir/snappie-$_source_version"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 snappie/icons/snappie.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/snappie.svg"
+    install -dm755 "$pkgdir/usr/share/applications"
+    python -c 'from snappie.hotkeys import desktop_entry; print(desktop_entry("/usr/bin/snappie"))' \
+        > "$pkgdir/usr/share/applications/snappie.desktop"
+    desktop-file-validate "$pkgdir/usr/share/applications/snappie.desktop"
+}
+
+package_snappie-purpose() {
+    pkgdesc='Snappie integration in KDE Share menus'
+    depends=("snappie=$epoch:$pkgver-$pkgrel" purpose kcoreaddons qt6-base)
+    cd "$srcdir/snappie-$_source_version"
+    DESTDIR="$pkgdir" cmake --install build-purpose
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -dm755 "$pkgdir/usr/share/dbus-1/services"
+    cat > "$pkgdir/usr/share/dbus-1/services/io.github.snappie.service" <<'EOD'
+[D-BUS Service]
+Name=io.github.snappie
+Exec=/usr/bin/snappie service
+EOD
+}

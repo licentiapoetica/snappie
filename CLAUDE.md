@@ -36,6 +36,18 @@ reusable tests workflow and installed-wheel checks; manual runs only upload prev
 artifacts. `.github/scripts/` contains the version gate, wheel smoke check (also used by
 `tests.yml`) and draft-first publisher. No tag should be pushed just to test a workflow.
 
+Arch artifacts: `packaging/arch/PKGBUILD.in` is rendered with the release sdist's
+version and checksum. The release workflow builds `snappie` and optional
+`snappie-purpose` as an unprivileged user in the official Arch container and
+checks both installed packages before publishing. Depend on Arch's `python`
+without a minor-version cap. Unofficial packages must be rebuilt after Python
+minor upgrades because the site-packages path changes.
+
+The self-contained VCS AUR recipe is `packaging/aur/snappie-git/PKGBUILD` with
+checked-in `.SRCINFO`. It builds `snappie-git` and `snappie-purpose-git` from
+upstream master. Regenerate `.SRCINFO` after recipe changes; preview CI builds
+and installs both variants, while production tags only build release packages.
+
 Runtime deps: python3-pyqt6 (incl. QtSvg), python3-dbus, PyGObject with GStreamer +
 GLib, numpy, gstreamer `pipewiresrc` and VA plugins (`vah265enc`/`vah264enc`/`vaav1enc`,
 `vapostproc`), libwayland-client, ffmpeg (GIF/WebP),
