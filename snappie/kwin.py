@@ -148,7 +148,7 @@ _SKIP_JS = r"""
 var pid = %PID%, captions = %CAPTIONS%;
 function skip(w) {
     if (w.pid != pid) return;
-    if (captions.indexOf(w.caption) < 0) {
+    if (!Object.prototype.hasOwnProperty.call(captions, w.caption)) {
         if (!w.snappieSkipWatched) {
             w.snappieSkipWatched = true;
             w.captionChanged.connect(function () { skip(w); });
@@ -156,7 +156,7 @@ function skip(w) {
         return;
     }
     w.skipTaskbar = true;
-    w.skipSwitcher = true;
+    w.skipSwitcher = captions[w.caption];
     w.skipPager = true;
 }
 workspace.windowAdded.connect(skip);
@@ -168,6 +168,25 @@ _ACTIVATE_JS = r"""
 var id = %TARGET%, all = workspace.windowList();
 for (var i = 0; i < all.length; i++)
     if (all[i].internalId.toString() == id) workspace.activeWindow = all[i];
+"""
+
+_ACTIVATE_OVERLAY_JS = r"""
+var pid = %PID%, caption = %CAPTION%, all = workspace.windowList();
+var at = workspace.cursorPos, target = null;
+for (var i = 0; i < all.length; i++) {
+    var w = all[i];
+    if (w.pid != pid || w.caption != caption) continue;
+    if (!target) target = w;
+    var g = w.frameGeometry;
+    if (at.x >= g.x && at.x < g.x + g.width && at.y >= g.y && at.y < g.y + g.height) {
+        target = w;
+        break;
+    }
+}
+if (target) {
+    target.minimized = false;
+    workspace.activeWindow = target;
+}
 """
 
 
@@ -232,7 +251,7 @@ class KWin:
         self.on_upload = None      # (paths, done(urls, error)) for the `upload` D-Bus method
         self._placed = {}          # caption -> plugin name
         self._cursor_plugin = None
-        self._skipped = set()      # captions kept off the taskbar (one script for all)
+        self._skipped = {}         # caption -> skipSwitcher (one script for all)
         self._suspended = set()    # effects unloaded for a capture (suspend_effect)
         kwin = bus.get_object("org.kde.KWin", "/Scripting")
         self._load = kwin.get_dbus_method("loadScript", "org.kde.kwin.Scripting")
@@ -307,14 +326,14 @@ class KWin:
             except dbus.DBusException:
                 pass
 
-    def skip_taskbar(self, caption):
-        """Keep our windows titled `caption` out of the taskbar, pager and Alt+Tab from now on.
+    def skip_taskbar(self, caption, skip_switcher=True):
+        """Keep our windows titled `caption` out of the taskbar and pager, optionally Alt+Tab.
         Call before showing them: the script catches them as KWin adds them."""
-        if caption in self._skipped:
+        if self._skipped.get(caption) == skip_switcher:
             return
-        self._skipped.add(caption)
+        self._skipped[caption] = skip_switcher
         self._run_script(_SKIP_JS.replace("%PID%", str(os.getpid()))
-                         .replace("%CAPTIONS%", json.dumps(sorted(self._skipped))), "snappie_skip")
+                         .replace("%CAPTIONS%", json.dumps(self._skipped)), "snappie_skip")
 
     # recording bar (kept for the old call sites)
     def place_controls(self, caption, target_id, rect):
@@ -356,6 +375,12 @@ class KWin:
     def activate(self, window_id):
         self._run_script(_ACTIVATE_JS.replace("%TARGET%", json.dumps(window_id)), "snappie_activate")
         GLib.timeout_add(500, lambda: self._unload("snappie_activate") and False)
+
+    def activate_overlay(self, caption):
+        """Restore keyboard focus to our overlay on the cursor's screen, even on Wayland."""
+        self._run_script(_ACTIVATE_OVERLAY_JS.replace("%PID%", str(os.getpid()))
+                         .replace("%CAPTION%", json.dumps(caption)), "snappie_activate_overlay")
+        GLib.timeout_add(500, lambda: self._unload("snappie_activate_overlay") and False)
 
     def suspend_effect(self, name):
         """Unload a KWin effect for now (the user's config is untouched). True if it was loaded;

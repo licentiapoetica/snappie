@@ -1,9 +1,13 @@
+from types import SimpleNamespace
+
+import pytest
 from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
+from PyQt6.QtGui import QImage
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDialog, QWidget
 
 from snappie import kwin, osd, style
-from snappie.picker import Picker
+from snappie.picker import Overlay, Picker
 
 
 class Keys(QWidget):
@@ -166,3 +170,88 @@ def test_middle_click_does_nothing_without_the_record_shortcut(qapp):
         assert got == []
     finally:
         pk._finish(None)
+
+
+@pytest.fixture
+def frozen_picker(qapp):
+    scr = qapp.primaryScreen()
+    bg = QImage(scr.size(), QImage.Format.Format_RGB32)
+    bg.fill(Qt.GlobalColor.white)
+    pk = Picker([], NoTree(), own_pid=42, mode="shot", backgrounds={scr.name(): bg})
+    pk.mouse_move(scr.geometry().center())
+    pk.show()
+    qapp.processEvents()
+    try:
+        yield pk, pk.overlays[0]
+    finally:
+        pk._finish(None)
+
+
+def test_hint_bar_fades_and_loupe_tracks_over_it(frozen_picker, monkeypatch):
+    pk, overlay = frozen_picker
+    normal = overlay.grab().toImage()
+    bar = QRect(overlay._hint_bar)
+    pixel = bar.topLeft() + QPoint(2, 2)  # panel background, clear of text
+    assert normal.pixelColor(pixel).red() == 0
+    loupes = []
+    monkeypatch.setattr(overlay, "_draw_loupe", lambda p, pk, at: loupes.append(QPoint(at)))
+
+    at = bar.center()
+    QTest.mouseMove(overlay, at)
+    faded = overlay.grab().toImage()
+    assert pk.cursor == overlay.scr.geometry().topLeft() + at
+    assert loupes[-1] == at
+    assert faded.pixelColor(pixel).red() > 100  # frozen desktop shows through the whole panel
+
+    QTest.mouseMove(overlay, QPoint(10, overlay.height() // 2))
+    restored = overlay.grab().toImage()
+    assert restored.pixelColor(pixel).red() == 0
+
+
+def test_click_through_hint_bar_selects_underlying_area(frozen_picker):
+    pk, overlay = frozen_picker
+    got = picked(pk)
+    at = overlay._hint_bar.center()
+    QTest.mouseClick(overlay, Qt.MouseButton.LeftButton, pos=at)
+    assert len(got) == 1 and got[0].kind == "screen"
+
+
+def test_drag_can_start_inside_hint_bar(frozen_picker):
+    pk, overlay = frozen_picker
+    got = picked(pk)
+    start = overlay._hint_bar.center()
+    end = start - QPoint(70, 80)
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+    assert len(got) == 1 and got[0].kind == "region"
+    origin = overlay.scr.geometry().topLeft()
+    assert got[0].rect == QRect(start + origin, end + origin).normalized()
+
+
+def test_record_cursor_checkbox_still_toggles(frozen_picker):
+    pk, overlay = frozen_picker
+    pk.mode = "record"
+    overlay.grab()
+    got = picked(pk)
+    before = pk.show_cursor
+    QTest.mouseClick(overlay, Qt.MouseButton.LeftButton, pos=overlay._cursor_toggle.center())
+    assert pk.show_cursor != before
+    assert got == [] and pk.press is None
+
+
+@pytest.mark.parametrize("command", ["shot", "record", "color", "ocr", "scroll"])
+def test_capture_commands_restore_existing_picker(qapp, command):
+    from snappie.app import App
+    from snappie.cli import parse
+
+    app = App.__new__(App)
+    shown, activated = [], []
+    pk = SimpleNamespace(show=lambda: shown.append(True))
+    app.picker = pk
+    app.recording = None
+    app.kwin = SimpleNamespace(activate_overlay=activated.append)
+    app.idle_check = lambda: None
+    app._run(parse([command]))
+    assert app.picker is pk and shown == [True]
+    assert activated == [Overlay.TITLE]

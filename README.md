@@ -177,6 +177,10 @@ bigger ones, or point at the title bar to take the whole window:
 | C                 | recordings: include the mouse cursor                       |
 | Esc / right click | cancel                                                     |
 
+If you switch away, return with Alt+Tab, the tray icon, or a capture shortcut.
+The bottom shortcut bar fades when you point at it, so you can pick or drag
+through it while the magnifier keeps following the cursor.
+
 **Transparent** and **shadow** window shots use the window's own pixels:
 rounded corners stay transparent, it's correct even when other windows cover
 it, and *shadow* adds a soft drop shadow around it.
