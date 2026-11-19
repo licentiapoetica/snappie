@@ -10,6 +10,7 @@ on:
       - .github/workflows/tests.yml
       - .github/scripts/**
       - pyproject.toml
+      - snappie/__init__.py
       - build_support.py
       - MANIFEST.in
       # What the 22.04 and ARM64 builds and the installed-wheel check exercise.

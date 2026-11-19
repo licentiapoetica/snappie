@@ -15,6 +15,7 @@ copy, save, upload, pin or record it. There's no screen-share dialog.
 snappie               # starts the tray app in the background
 snappie --foreground  # run in the terminal for debugging
 snappie --help        # all commands
+snappie -v            # the version (also at the bottom of the settings)
 ```
 
 `install.sh` links `snappie` into `~/.local/bin`. If that folder isn't on your

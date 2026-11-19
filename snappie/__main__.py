@@ -101,12 +101,14 @@ def _main():
         migrate.run(bus)          # from the old "screenrec" name, once
     except Exception as e:  # noqa: BLE001 - never block starting
         print("snappie: migrating from screenrec failed:", e, file=sys.stderr)
+    from . import version
     from .app_util import log
     from .kwin import AlreadyRunning, KWin
     try:
         kwin = KWin(bus)
     except AlreadyRunning:  # lost a race with another start: forward after all
         return _forward(cli.normalize(argv)) or 0
+    log(f"starting {version()} ({ns.cmd})")
     try:
         cast.ensure_helper()
     except RuntimeError as e:
@@ -118,6 +120,7 @@ def _main():
     from PyQt6.QtWidgets import QApplication
     qapp = QApplication(sys.argv[:1])
     qapp.setApplicationName("snappie")
+    qapp.setApplicationVersion(version())
     qapp.setDesktopFileName("snappie")
     # no setApplicationDisplayName: Qt would append " — Snappie" to every window title, and
     # KWin finds our windows (recording bar, area border, drawing layer, …) by exact title

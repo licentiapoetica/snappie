@@ -19,7 +19,9 @@ from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QColorD
                              QTableWidget,
                              QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
-from . import ocr, settings, style, upload, uploaders
+from . import ocr, settings, style, upload, uploaders, version
+
+REPO = "https://github.com/licentiapoetica/snappie"
 
 SHOT_AFTER = [("copy", "Copy to clipboard"), ("save", "Save to file"), ("upload", "Upload"),
               ("pin", "Pin to screen"), ("ocr", "Recognize text (OCR)"), ("edit", "Open in editor")]
@@ -266,9 +268,19 @@ class SettingsDialog(QDialog):
                                                           "(saved when you press OK or Apply)")
         self.buttons.button(B.RestoreDefaults).clicked.connect(self.restore_defaults)
 
+        about = _hint(f'Snappie {html.escape(version())} · <a href="{REPO}">GitHub</a>')
+        about.setWordWrap(False)
+        about.setOpenExternalLinks(True)
+        about.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)  # copyable
+        about.setToolTip("Mention this version when reporting a problem")
+        bottom = QHBoxLayout()
+        bottom.addWidget(about)
+        bottom.addStretch(1)
+        bottom.addWidget(self.buttons)
+
         lay = QVBoxLayout(self)
         lay.addWidget(self.tabs, 1)
-        lay.addWidget(self.buttons)
+        lay.addLayout(bottom)
         self.load()
 
     # -- binding

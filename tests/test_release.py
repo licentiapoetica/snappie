@@ -22,17 +22,23 @@ spec.loader.exec_module(release_version)
     ("0.1.0", "", False),  # manual/PR build
 ])
 def test_release_version(version, tag, prerelease):
-    assert release_version.release_version({"project": {"version": version}}, tag) == (version, prerelease)
+    assert release_version.release_version(version, tag) == (version, prerelease)
 
 
 def test_release_tag_must_match_package():
     with pytest.raises(ValueError, match="must match"):
-        release_version.release_version({"project": {"version": "0.1.0"}}, "v0.2.0")
+        release_version.release_version("0.1.0", "v0.2.0")
 
 
 def test_release_version_must_be_normalized():
     with pytest.raises(ValueError, match="normalized"):
-        release_version.release_version({"project": {"version": "0.2.0-rc1"}}, "v0.2.0-rc1")
+        release_version.release_version("0.2.0-rc1", "v0.2.0-rc1")
+
+
+def test_release_reads_the_package_version():
+    import snappie
+    source = (Path(snappie.__file__)).read_text()
+    assert release_version.package_version(source) == snappie.__version__
 
 
 @pytest.fixture

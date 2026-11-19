@@ -2,11 +2,12 @@
 
 The release workflow builds x86-64 and ARM64 wheels plus a source archive. Pushing
 a `vVERSION` tag publishes a GitHub release only after the full test suite and
-both installed-wheel checks pass. The tag must match `version` in `pyproject.toml`
-exactly. Release candidates such as `0.2.0rc1` are marked as prereleases.
+both installed-wheel checks pass. The tag must match `__version__` in
+`snappie/__init__.py` exactly (`pyproject.toml` reads it from there). Release
+candidates such as `0.2.0rc1` are marked as prereleases.
 
-Update the package version, merge that change into `master`, then tag that commit.
-For example, the first release uses:
+Update `__version__` in `snappie/__init__.py`, merge that change into `master`, then
+tag that commit. For example, the first release uses:
 
 ```sh
 git switch master
@@ -33,6 +34,10 @@ The workflow and its scripts:
 - `.github/workflows/release.yml` builds on Ubuntu 22.04 (x86-64 and ARM64), tags the wheels
   `manylinux_2_35_…` (the build system's glibc), and publishes after `tests.yml` passes.
 - `.github/scripts/release-version.py` rejects a tag that doesn't match the package version.
+
+`snappie -v` and the settings dialog show the version. Run from a git checkout that isn't
+exactly at the release tag, they add `git describe` output, e.g. `0.1.0 (git v0.1.0-3-gefd4133)`,
+so reports from development builds can be told apart from releases.
 - `.github/scripts/check-wheel.py` checks a wheel installed outside the checkout, with no build
   tools on `PATH`. `tests.yml` runs it too.
 - `.github/scripts/publish-release.sh` uploads to a draft first and publishes it last. Only the
