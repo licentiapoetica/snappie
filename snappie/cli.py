@@ -13,6 +13,17 @@ class ArgError(Exception):
     pass
 
 
+class _Version(argparse.Action):
+    """Like action="version", but only asks git (checkouts) when -v is actually given."""
+    def __init__(self, option_strings, dest, **kw):
+        super().__init__(option_strings, dest, nargs=0, **kw)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import version
+        print("snappie", version())
+        parser.exit()
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message):  # don't sys.exit inside the tray app
         raise ArgError(f"{self.prog}: {message}")
@@ -22,6 +33,7 @@ def build_parser():
     ap = _Parser(prog="snappie", description="Screenshots, annotation and screen recording for "
                                                "KDE Plasma (Wayland). Without a command: start the tray app "
                                                "in the background. Use --foreground for debugging.")
+    ap.add_argument("-v", "--version", action=_Version, help="show the version and exit")
     sub = ap.add_subparsers(dest="cmd", parser_class=_Parser, metavar="command")
 
     tray = sub.add_parser("tray", help="start the tray app in the background (default)")
@@ -198,7 +210,7 @@ def normalize(argv):
         return ["tray"] + argv
     if argv[0] == "--stop":
         return ["stop"]
-    if argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
+    if argv[0].startswith("-") and argv[0] not in ("-h", "--help", "-v", "--version"):
         return ["record"] + argv
     return argv
 
@@ -237,7 +249,8 @@ def absolute_paths(argv):
 
 
 def parse(argv):
-    """-> argparse.Namespace (cmd set). Raises ArgError; prints help + raises SystemExit for -h."""
+    """-> argparse.Namespace (cmd set). Raises ArgError; prints help or the version and raises
+    SystemExit for -h and -v."""
     ns = build_parser().parse_args(normalize(argv))
     if not ns.cmd:
         ns.cmd = "tray"

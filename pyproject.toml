@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "snappie"
-version = "0.1.0"
+dynamic = ["version"]   # snappie/__init__.py
 description = "Screenshots, annotation, screen recording and sharing for KDE Plasma on Wayland"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,9 @@ Issues = "https://github.com/licentiapoetica/snappie/issues"
 
 [tool.setuptools]
 include-package-data = false
+
+[tool.setuptools.dynamic]
+version = {attr = "snappie.__version__"}
 
 [tool.setuptools.cmdclass]
 build_py = "build_support.BuildPy"

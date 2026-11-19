@@ -93,3 +93,26 @@ def test_convert_size():
     for bad in ("8X", "1k", "big"):
         with pytest.raises(cli.ArgError):
             cli.parse(["convert", "--mp4", "--size", bad, "v.mkv"])
+
+
+@pytest.mark.parametrize("flag", ["-v", "--version"])
+def test_version(flag, capsys):
+    import snappie
+    assert cli.normalize([flag]) == [flag]      # not "record -v"
+    with pytest.raises(SystemExit) as e:
+        cli.parse([flag])
+    assert e.value.code == 0
+    assert capsys.readouterr().out == f"snappie {snappie.version()}\n"
+
+
+def test_version_outside_a_checkout(monkeypatch):
+    import snappie
+    monkeypatch.setattr(snappie, "_described", None)
+    monkeypatch.setattr(snappie, "_git_describe", lambda top: None)
+    assert snappie.version() == snappie.__version__
+    monkeypatch.setattr(snappie, "_described", None)
+    monkeypatch.setattr(snappie, "_git_describe", lambda top: f"v{snappie.__version__}")
+    assert snappie.version() == snappie.__version__          # exactly the release tag
+    monkeypatch.setattr(snappie, "_described", None)
+    monkeypatch.setattr(snappie, "_git_describe", lambda top: "v0.1.0-3-gefd4133-dirty")
+    assert snappie.version() == f"{snappie.__version__} (git v0.1.0-3-gefd4133-dirty)"

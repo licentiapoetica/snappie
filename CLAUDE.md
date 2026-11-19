@@ -31,8 +31,9 @@ to `~/.local/state/snappie/console.log`.
 
 Releases: see [docs/releasing.md](docs/releasing.md). `.github/workflows/release.yml`
 builds on Ubuntu 22.04 for x86-64 and ARM64 and tags wheels `manylinux_2_35` (its glibc).
-Tags must be `v` plus the exact `pyproject.toml` version. Publishing waits for the
-reusable tests workflow and installed-wheel checks; manual runs only upload preview
+The version lives only in `__version__` in `snappie/__init__.py` (`pyproject.toml` reads it;
+`snappie.version()` adds `git describe` in checkouts). Tags must be `v` plus that exact version.
+Publishing waits for the reusable tests workflow and installed-wheel checks; manual runs only upload preview
 artifacts. `.github/scripts/` contains the version gate, wheel smoke check (also used by
 `tests.yml`) and draft-first publisher. No tag should be pushed just to test a workflow.
 
