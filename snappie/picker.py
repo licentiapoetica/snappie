@@ -15,7 +15,7 @@ the others, and the app makes the capture match (see App._bring_front).
 import re
 import threading
 
-from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QRegion
 from PyQt6.QtWidgets import QWidget
 
@@ -142,6 +142,9 @@ class Picker(QObject):
         self._peeks = {}        # window id -> its own pixels (QImage) | "pending" | None (failed)
         self._peeked.connect(self._on_peeked)
         self._timer = QTimer(self, singleShot=True, interval=REFRESH_MS, timeout=self._refresh)
+        self._had_focus = False
+        # Focus can briefly leave all overlays while moving between screens.
+        self._focus_timer = QTimer(self, singleShot=True, interval=100, timeout=self._check_focus)
         self._shown = None      # what the overlays currently show (skip repaints when unchanged)
         self.overlays = [Overlay(self, s) for s in QGuiApplication.screens()]
         # capture + analyse windows in the background so areas are ready on hover
@@ -153,6 +156,19 @@ class Picker(QObject):
     def show(self):
         for o in self.overlays:
             o.present()
+
+    def focus_changed(self):
+        if self._done:
+            return
+        if any(o.isActiveWindow() for o in self.overlays):
+            self._had_focus = True
+            self._focus_timer.stop()
+        elif self._had_focus:
+            self._focus_timer.start()
+
+    def _check_focus(self):
+        if not self._done and not any(o.isActiveWindow() for o in self.overlays):
+            self._finish(None)
 
     # -- background area detection --
 
@@ -537,6 +553,8 @@ class Picker(QObject):
         with self._cond:
             self._done = True
             self._cond.notify()
+        self._timer.stop()
+        self._focus_timer.stop()
         # hand over while our overlay still has focus (Wayland clipboard) and is still covering
         # the screen (the in-place editor replaces it without flicker), then close
         try:
@@ -574,6 +592,7 @@ class Overlay(QWidget):
         self._crumb_bar = QRect()
         self._hint_bar = QRect()
         self._cursor_toggle = QRect()
+        self._hint_hover = False
         self._toggle_hover = False
 
     def present(self):
@@ -581,6 +600,11 @@ class Overlay(QWidget):
         self.setGeometry(self.scr.geometry())
         self.showFullScreen()
         self.activateWindow()
+
+    def changeEvent(self, ev):
+        super().changeEvent(ev)
+        if ev.type() == QEvent.Type.ActivationChange:
+            self.picker.focus_changed()
 
     def _global(self, ev):
         return self.scr.geometry().topLeft() + ev.position().toPoint()
@@ -593,17 +617,14 @@ class Overlay(QWidget):
 
     def mouseMoveEvent(self, ev):
         local = ev.position().toPoint()
+        hint_hover = self._hint_bar.contains(local)
+        toggle_hover = self.picker.press is None and self._cursor_toggle.contains(local)
+        if hint_hover != self._hint_hover or toggle_hover != self._toggle_hover:
+            self._hint_hover, self._toggle_hover = hint_hover, toggle_hover
+            self.update()  # repaint the whole bar when its opacity changes
         if self.picker.press is None and self._crumb_bar.contains(local):
             self.picker.hover_crumb(self._crumb_at(local))  # selection stays frozen over the bar
             return
-        if self.picker.press is None and self._hint_bar.contains(local):
-            hover = self._cursor_toggle.contains(local)
-            if hover != self._toggle_hover:
-                self._toggle_hover = hover
-                self.update()
-            return
-        if self._toggle_hover:
-            self._toggle_hover = False
         self.picker.mouse_move(self._global(ev))
 
     def mousePressEvent(self, ev):
@@ -613,9 +634,8 @@ class Overlay(QWidget):
             if i is not None:
                 self.picker.set_level(i)
             return
-        if ev.button() == Qt.MouseButton.LeftButton and self._hint_bar.contains(local):
-            if self._cursor_toggle.contains(local):
-                self.picker.toggle_cursor()
+        if ev.button() == Qt.MouseButton.LeftButton and self._cursor_toggle.contains(local):
+            self.picker.toggle_cursor()
             return
         self.picker.mouse_press(self._global(ev), ev.button())
 
@@ -706,8 +726,7 @@ class Overlay(QWidget):
             if pk.mode != "color":
                 self._draw_crumbs(p, pk)
             self._draw_hint(p)
-            if pk.magnifier and pk.backgrounds and self._hint_bar.contains(pk.cursor - origin) is False \
-                    and not self._crumb_bar.contains(pk.cursor - origin):
+            if pk.magnifier and pk.backgrounds and not self._crumb_bar.contains(pk.cursor - origin):
                 self._draw_loupe(p, pk, pk.cursor - origin)
         p.end()
 
@@ -730,6 +749,7 @@ class Overlay(QWidget):
         img, px = pk.background_at(pk.cursor)
         if img is None:
             return
+        p.setBrush(Qt.BrushStyle.NoBrush)  # borders must not fill over the zoomed pixels
         n, z = LOUPE_PX, LOUPE_ZOOM
         if pk.mode == "color":
             n, z = 17, 11
@@ -887,6 +907,10 @@ class Overlay(QWidget):
         rows.append((row, row_w))
         total = max(w for _, w in rows)
         bar = QRect((self.width() - total) // 2, self.height() - h * len(rows) - 36, total, h * len(rows))
+        self._hint_hover = pk.cursor is not None and bar.contains(pk.cursor - self.scr.geometry().topLeft())
+        p.save()
+        if self._hint_hover:
+            p.setOpacity(0.15)  # reveal the screen underneath; pointer input still reaches the picker
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(PANEL_BG)
@@ -927,3 +951,4 @@ class Overlay(QWidget):
                 p.drawText(QRect(tx, top, wd, h), Qt.AlignmentFlag.AlignVCenter, d)
                 x += wd + gap
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        p.restore()

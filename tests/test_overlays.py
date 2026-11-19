@@ -1,9 +1,11 @@
+import pytest
 from PyQt6.QtCore import QPoint, QRect, Qt, QTimer
+from PyQt6.QtGui import QImage
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDialog, QWidget
 
 from snappie import kwin, osd, style
-from snappie.picker import Picker
+from snappie.picker import Overlay, Picker
 
 
 class Keys(QWidget):
@@ -164,5 +166,123 @@ def test_middle_click_does_nothing_without_the_record_shortcut(qapp):
     try:
         pk.mouse_press(QPoint(50, 50), Qt.MouseButton.MiddleButton)
         assert got == []
+    finally:
+        pk._finish(None)
+
+
+@pytest.fixture
+def frozen_picker(qapp):
+    scr = qapp.primaryScreen()
+    bg = QImage(scr.size(), QImage.Format.Format_RGB32)
+    bg.fill(Qt.GlobalColor.white)
+    pk = Picker([], NoTree(), own_pid=42, mode="shot", backgrounds={scr.name(): bg})
+    pk.mouse_move(scr.geometry().center())
+    pk.show()
+    qapp.processEvents()
+    try:
+        yield pk, pk.overlays[0]
+    finally:
+        pk._finish(None)
+
+
+def test_hint_bar_fades_and_loupe_tracks_over_it(frozen_picker, monkeypatch):
+    pk, overlay = frozen_picker
+    normal = overlay.grab().toImage()
+    bar = QRect(overlay._hint_bar)
+    pixel = bar.topLeft() + QPoint(2, 2)  # panel background, clear of text
+    assert normal.pixelColor(pixel).red() == 0
+    loupes = []
+    monkeypatch.setattr(overlay, "_draw_loupe", lambda p, pk, at: loupes.append(QPoint(at)))
+
+    at = bar.center()
+    QTest.mouseMove(overlay, at)
+    faded = overlay.grab().toImage()
+    assert pk.cursor == overlay.scr.geometry().topLeft() + at
+    assert loupes[-1] == at
+    assert faded.pixelColor(pixel).red() > 100  # frozen desktop shows through the whole panel
+
+    QTest.mouseMove(overlay, QPoint(10, overlay.height() // 2))
+    restored = overlay.grab().toImage()
+    assert restored.pixelColor(pixel).red() == 0
+
+
+def test_loupe_preserves_screen_pixels_after_drawing_breadcrumbs(frozen_picker):
+    pk, overlay = frozen_picker
+    at = QPoint(100, 150)
+    pk.mouse_move(overlay.scr.geometry().topLeft() + at)
+    pk._refresh()
+    image = overlay.grab().toImage()
+    # Inside a zoomed pixel, clear of the grid, border and centre crosshair.
+    assert image.pixelColor(at + QPoint(28, 28)).name() == "#ffffff"
+
+
+def test_click_through_hint_bar_selects_underlying_area(frozen_picker):
+    pk, overlay = frozen_picker
+    got = picked(pk)
+    at = overlay._hint_bar.center()
+    QTest.mouseClick(overlay, Qt.MouseButton.LeftButton, pos=at)
+    assert len(got) == 1 and got[0].kind == "screen"
+
+
+def test_drag_can_start_inside_hint_bar(frozen_picker):
+    pk, overlay = frozen_picker
+    got = picked(pk)
+    start = overlay._hint_bar.center()
+    end = start - QPoint(70, 80)
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+    assert len(got) == 1 and got[0].kind == "region"
+    origin = overlay.scr.geometry().topLeft()
+    assert got[0].rect == QRect(start + origin, end + origin).normalized()
+
+
+def test_record_cursor_checkbox_still_toggles(frozen_picker):
+    pk, overlay = frozen_picker
+    pk.mode = "record"
+    overlay.grab()
+    got = picked(pk)
+    before = pk.show_cursor
+    QTest.mouseClick(overlay, Qt.MouseButton.LeftButton, pos=overlay._cursor_toggle.center())
+    assert pk.show_cursor != before
+    assert got == [] and pk.press is None
+
+
+def test_switching_away_cancels_picker(frozen_picker, qapp):
+    pk, overlay = frozen_picker
+    got = picked(pk)
+    assert overlay.isActiveWindow()
+    other = QWidget()
+    try:
+        other.show()
+        other.activateWindow()
+        QTest.qWait(150)
+        assert got == [None] and pk._done
+    finally:
+        other.close()
+
+
+def test_focus_transfer_between_screen_overlays_keeps_picker(frozen_picker, qapp):
+    pk, first = frozen_picker
+    got = picked(pk)
+    second = Overlay(pk, first.scr)
+    pk.overlays.append(second)
+    second.present()
+    QTest.qWait(150)
+    assert second.isActiveWindow()
+    assert got == [] and not pk._done
+    first.activateWindow()
+    QTest.qWait(150)
+    assert first.isActiveWindow()
+    assert got == [] and not pk._done
+
+
+def test_picker_does_not_cancel_before_it_gains_focus(qapp):
+    pk = Picker([], NoTree(), own_pid=42)
+    got = picked(pk)
+    try:
+        pk.focus_changed()
+        QTest.qWait(150)
+        assert got == [] and not pk._done
     finally:
         pk._finish(None)
