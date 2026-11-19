@@ -13,7 +13,7 @@ from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetrics, QImage, QPainter, QPainterPath, QRegion
 from PyQt6.QtWidgets import QWidget
 
-from .. import style
+from .. import settings, style
 from .canvas import Canvas
 from .document import Document
 from .panels import PropsPanel, ToolPanel
@@ -36,7 +36,7 @@ class InPlaceEditor(QWidget):
     action = pyqtSignal(str, object)    # (name, Document)
     TITLE = "Snappie — editor"
 
-    def __init__(self, screen, background, rect, windows=None):
+    def __init__(self, screen, background, rect, windows=None, pointer=None, drag_up=False):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         style.mark_overlay(self)
         self.scr = screen
@@ -47,6 +47,9 @@ class InPlaceEditor(QWidget):
         self.can_record = False  # middle click: record this area instead (set by the app)
         geo = screen.geometry()
         origin = geo.topLeft()
+        self._near_cursor = settings.get("shot.toolbar_position") == "cursor"
+        self._anchor = (QPoint(pointer) - origin, drag_up) if self._near_cursor and pointer is not None else None
+        self._crop_press = None
         if geo.width() and abs(background.width() / background.devicePixelRatio() - geo.width()) > 1:
             background = QImage(background)     # dpr not set: derive it from the screen size
             background.setDevicePixelRatio(background.width() / geo.width())
@@ -170,7 +173,7 @@ class InPlaceEditor(QWidget):
 
     def _place_panels(self, force=False):
         sel = self.doc.bounds().toAlignedRect()
-        key = (sel, self.props.isVisibleTo(self), self.width(), self.height(), self._manual)
+        key = (sel, self.props.isVisibleTo(self), self.width(), self.height(), self._manual, self._anchor)
         if not force and key == self._placed_for:
             return
         self._placed_for = key
@@ -184,16 +187,27 @@ class InPlaceEditor(QWidget):
             self._place_manual(ts, ps)
             return
         h = ts.height() + (GAP // 2 + ps.height() if ps else 0)
-        if sel.bottom() + GAP + h <= scr.height() - MARGIN:          # below
+        cx = sel.center().x()
+        if self._anchor is not None:
+            at, above = self._anchor
+            cx = at.x()
+            below_y, above_y = at.y() + GAP, at.y() - GAP - h
+            candidates = (above_y, below_y) if above else (below_y, above_y)
+            y = next((y for y in candidates if MARGIN <= y and y + h <= scr.height() - MARGIN), None)
+            if y is None:
+                # Neither side fits: use the roomier side, then keep the whole group on screen.
+                y = above_y if at.y() > scr.height() - at.y() else below_y
+                y = max(MARGIN, min(y, scr.height() - h - MARGIN))
+        elif sel.bottom() + GAP + h <= scr.height() - MARGIN:        # below
             y = sel.bottom() + GAP
         elif sel.top() - GAP - h >= MARGIN:                           # above
             y = sel.top() - GAP - h
         else:                                                         # inside, at the bottom
             y = max(MARGIN, min(sel.bottom() - GAP - h, scr.height() - h - MARGIN))
-        tx = max(MARGIN, min(sel.center().x() - ts.width() // 2, scr.width() - ts.width() - MARGIN))
+        tx = max(MARGIN, min(cx - ts.width() // 2, scr.width() - ts.width() - MARGIN))
         self.tools.move(tx, y)
         if ps:
-            px = max(MARGIN, min(sel.center().x() - ps.width() // 2, scr.width() - ps.width() - MARGIN))
+            px = max(MARGIN, min(cx - ps.width() // 2, scr.width() - ps.width() - MARGIN))
             self.props.move(px, y + ts.height() + GAP // 2)
         self.tools.raise_()
         self.props.raise_()
@@ -233,6 +247,8 @@ class InPlaceEditor(QWidget):
 
     def mousePressEvent(self, ev):
         used = self.canvas.press(ev.position(), ev.button(), ev.modifiers())
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._crop_press = (ev.position(), self.doc.bounds()) if self._busy() else None
         if not used and ev.button() == Qt.MouseButton.RightButton and not self.doc.shapes:
             self.finish("cancel")       # like the picker, while nothing has been drawn
         elif not used and ev.button() == Qt.MouseButton.MiddleButton and self.can_record:
@@ -245,7 +261,13 @@ class InPlaceEditor(QWidget):
 
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.MouseButton.LeftButton:
+            crop_press = self._crop_press if self._busy() else None
+            self._crop_press = None
             self.canvas.release(ev.position(), ev.modifiers())
+            if self._near_cursor and crop_press is not None and crop_press[1] != self.doc.bounds():
+                self._anchor = (ev.position().toPoint(), ev.position().y() < crop_press[0].y())
+                self._place_panels(force=True)
+                self._update_around_panels()
             self.setCursor(self.canvas.cursor_at(ev.position()))
 
     def mouseDoubleClickEvent(self, ev):

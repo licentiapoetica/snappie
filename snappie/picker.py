@@ -86,6 +86,8 @@ class Selection:
         self.color = None
         self.front = None
         self.record = False    # screenshot picker: middle click asks for a recording of it instead
+        self.pointer = None    # mouse selection endpoint, in global logical coordinates
+        self.drag_up = False
 
 
 def _base_caption(caption):
@@ -422,12 +424,14 @@ class Picker(QObject):
         if drag is not None and drag.width() >= 16 and drag.height() >= 16:
             sel = self._drag_selection(press, drag)
             if sel:
+                sel.pointer = QPoint(p)
+                sel.drag_up = p.y() < press.y()
                 self._finish(sel)
         elif drag is None:
             self.cursor = p
             if self.mode != "color":
                 self._refresh()
-            self.select_current()
+            self.select_current(p)
         else:
             self._update()
 
@@ -483,7 +487,7 @@ class Picker(QObject):
         self._level_by_key[self._key] = self._anchor
         self._update()
 
-    def select_current(self):
+    def select_current(self, pointer=None):
         if self.mode == "color":
             return self._pick_color()
         if not self.levels:
@@ -492,7 +496,9 @@ class Picker(QObject):
         if self.mode == "scroll" and not lv.win:
             self.status = "pick a window or an area inside one"
             return self._update()
-        self._finish(Selection(lv.rect, lv.win, lv.describe(), lv.kind))
+        sel = Selection(lv.rect, lv.win, lv.describe(), lv.kind)
+        sel.pointer = QPoint(pointer) if pointer is not None else None
+        self._finish(sel)
 
     def toggle_cursor(self):
         self.show_cursor = not self.show_cursor

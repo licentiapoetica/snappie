@@ -198,6 +198,13 @@ gap between buttons) to put it anywhere; double-click it to bring it back. Enter
 window with zoom, canvas crop and a frame panel (padding, background, rounded
 corners, shadow).
 
+Settings → Screenshots → **Toolbar position → Near cursor** places the toolbar
+near where you release the mouse: above an upward drag, below otherwise. It
+flips sides or shifts inward at screen edges, keeping the properties strip on
+screen too. Moving, resizing or reselecting the area updates its position;
+annotation leaves it still. Manual toolbar placement takes priority until you
+double-click its grip. **Selection center** keeps the default placement.
+
 ## After capture
 
 Copy, save (`~/Pictures/Snappie`), upload, pin to the screen (always on top;
