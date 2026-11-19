@@ -387,7 +387,7 @@ class App(QObject):
 
     def pick(self, mode, on_pick, frozen=True, show_cursor=None):
         """Show the picker. frozen: grab the screens first and show them still (screenshots)."""
-        if self._resume_picker():
+        if self.picker:
             return
         if frozen:
             self._undim()  # for the whole pick: windows are also grabbed while picking and after it
@@ -399,8 +399,7 @@ class App(QObject):
 
     def _pick(self, mode, on_pick, frozen, show_cursor):
         from .picker import Overlay, Picker
-        # Stay reachable through Alt+Tab without triggering Plasma's fullscreen Do Not Disturb.
-        self.kwin.skip_taskbar(Overlay.TITLE, skip_switcher=False)
+        self.kwin.skip_taskbar(Overlay.TITLE)  # else Plasma's fullscreen Do Not Disturb kicks in
         windows = self.kwin.list_windows()
         bgs = {}
         magnifier = settings.get("shot.magnifier")
@@ -421,14 +420,6 @@ class App(QObject):
         self._pick_windows = windows
         self.picker.finished.connect(lambda sel: self._picked(sel, on_pick))
         self.picker.show()
-
-    def _resume_picker(self):
-        if not self.picker:
-            return False
-        from .picker import Overlay
-        self.picker.show()
-        self.kwin.activate_overlay(Overlay.TITLE)
-        return True
 
     def _picked(self, sel, on_pick):
         pk, self.picker = self.picker, None
@@ -507,7 +498,7 @@ class App(QObject):
     # ------------------------------------------------------------------ screenshots
 
     def screenshot(self, screen=False, window=False, last=False, delay=0, then=None, output=None):
-        if self._resume_picker():
+        if self.picker:
             return
         opts = {"then": [a.strip() for a in then.split(",") if a.strip()] if then else None,
                 "output": output}
@@ -1191,7 +1182,7 @@ class App(QObject):
         if self.recording:
             self.recording.stop()
             return
-        if self._resume_picker():
+        if self.picker:
             return
         anim = "webp" if ns.webp else "gif" if ns.gif else None
         if ns.gif and settings.get("gif.format") == "webp":

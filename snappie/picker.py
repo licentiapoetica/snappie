@@ -15,7 +15,7 @@ the others, and the app makes the capture match (see App._bring_front).
 import re
 import threading
 
-from PyQt6.QtCore import QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen, QRegion
 from PyQt6.QtWidgets import QWidget
 
@@ -142,6 +142,9 @@ class Picker(QObject):
         self._peeks = {}        # window id -> its own pixels (QImage) | "pending" | None (failed)
         self._peeked.connect(self._on_peeked)
         self._timer = QTimer(self, singleShot=True, interval=REFRESH_MS, timeout=self._refresh)
+        self._had_focus = False
+        # Focus can briefly leave all overlays while moving between screens.
+        self._focus_timer = QTimer(self, singleShot=True, interval=100, timeout=self._check_focus)
         self._shown = None      # what the overlays currently show (skip repaints when unchanged)
         self.overlays = [Overlay(self, s) for s in QGuiApplication.screens()]
         # capture + analyse windows in the background so areas are ready on hover
@@ -153,6 +156,19 @@ class Picker(QObject):
     def show(self):
         for o in self.overlays:
             o.present()
+
+    def focus_changed(self):
+        if self._done:
+            return
+        if any(o.isActiveWindow() for o in self.overlays):
+            self._had_focus = True
+            self._focus_timer.stop()
+        elif self._had_focus:
+            self._focus_timer.start()
+
+    def _check_focus(self):
+        if not self._done and not any(o.isActiveWindow() for o in self.overlays):
+            self._finish(None)
 
     # -- background area detection --
 
@@ -537,6 +553,8 @@ class Picker(QObject):
         with self._cond:
             self._done = True
             self._cond.notify()
+        self._timer.stop()
+        self._focus_timer.stop()
         # hand over while our overlay still has focus (Wayland clipboard) and is still covering
         # the screen (the in-place editor replaces it without flicker), then close
         try:
@@ -582,6 +600,11 @@ class Overlay(QWidget):
         self.setGeometry(self.scr.geometry())
         self.showFullScreen()
         self.activateWindow()
+
+    def changeEvent(self, ev):
+        super().changeEvent(ev)
+        if ev.type() == QEvent.Type.ActivationChange:
+            self.picker.focus_changed()
 
     def _global(self, ev):
         return self.scr.geometry().topLeft() + ev.position().toPoint()
@@ -726,6 +749,7 @@ class Overlay(QWidget):
         img, px = pk.background_at(pk.cursor)
         if img is None:
             return
+        p.setBrush(Qt.BrushStyle.NoBrush)  # borders must not fill over the zoomed pixels
         n, z = LOUPE_PX, LOUPE_ZOOM
         if pk.mode == "color":
             n, z = 17, 11
