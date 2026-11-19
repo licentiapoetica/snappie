@@ -393,13 +393,19 @@ video in the history opens the video editor:
 - **Split** (S) cuts the timeline at the playhead. Double-click a part, or
   select it and press Delete, to remove it. Do the same again to bring it back.
   Removed parts are skipped while playing, so you see the result.
+- Hold the mouse down on the timeline and drag to select a range. The preview
+  follows the mouse, and you can drag the range's edges to adjust it. Playing
+  loops the selection, so you can check it. Press Delete to cut it out, or
+  **Export selection…** to save only that part. Esc drops the selection. Drag on the time ruler
+  above the timeline to scrub without selecting.
 - **Start here** (I) and **End here** (O) remove everything before or after
   the playhead.
 - **Crop** (C) draws a box over the video. Pick a shape (16:9, 9:16, 1:1, …)
   or keep it free. **Remove black bars** finds the box for you. Outside crop
   mode the preview shows only the cropped part, as it will be exported.
 - Space plays and pauses. Left and Right step one frame, and Shift steps
-  faster. Ctrl+Z undoes.
+  faster. Ctrl+Z undoes. The slider next to **Mute** (M) sets the preview
+  volume; it doesn't change the exported sound.
 - **Export…** (Ctrl+E) opens the convert window with your cuts and crop, so
   you can save the result as MP4, WebM, GIF or WebP.
 

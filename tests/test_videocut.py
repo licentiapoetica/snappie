@@ -47,3 +47,50 @@ def test_crop_is_clamped_even_and_undoable():
     assert v.undo() and v.crop == (0, 0, 1000, 1080)
     assert v.aspect_crop(1.0) == (420, 0, 1080, 1080)
     assert v.aspect_crop(9 / 16) == (656, 0, 608, 1080)
+
+
+def test_remove_a_dragged_range():
+    v = VideoCut(10, 100, 100)
+    assert v.set_range(6, 3, False)                               # either direction
+    assert [p[:2] for p in v.pieces] == [[0, 3], [3, 6], [6, 10]]
+    assert v.kept() == [(0, 3), (6, 10)]
+    assert not v.set_range(3, 6, False)                           # already removed
+    assert not v.range_kept(3, 6) and v.range_kept(2, 4)
+    assert v.set_range(3, 6, True) and v.segments() is None       # restored
+    assert v.undo() and v.kept() == [(0, 3), (6, 10)]
+
+
+def test_range_across_splits_becomes_one_piece():
+    v = VideoCut(10, 100, 100)
+    v.split(2), v.split(4), v.split(8)
+    v.toggle(1)                                                   # 2–4 removed
+    assert v.set_range(3, 9, False)
+    assert v.pieces == [[0, 2, True], [2, 3, False], [3, 9, False], [9, 10, True]]
+    assert v.kept() == [(0, 2), (9, 10)]
+
+
+def test_range_snaps_to_split_points_and_keeps_something():
+    v = VideoCut(10, 100, 100)
+    v.split(5)
+    assert v.set_range(5.02, 7, False)                            # snapped to the split at 5
+    assert v.pieces == [[0, 5, True], [5, 7, False], [7, 10, True]]
+    assert not v.set_range(4, 4.03, False)                        # too short
+    assert not v.set_range(0.01, 9.99, False)                     # snaps to the ends: nothing left
+    assert v.set_range(-1, 4, False) and v.kept() == [(4, 5), (7, 10)]
+
+
+def test_range_inside_a_removed_piece_changes_nothing():
+    v = VideoCut(10, 100, 100)
+    v.split(5), v.toggle(1)
+    assert not v.set_range(6, 8, False)
+    assert len(v.pieces) == 2
+
+
+def test_segments_within_a_selection():
+    v = VideoCut(10, 100, 100)
+    assert v.segments(within=(6, 2)) == [(2, 6)]
+    v.split(3), v.split(4), v.toggle(1)                           # 3–4 removed
+    assert v.segments(within=(2, 6)) == [(2, 3), (4, 6)]
+    assert v.segments(within=(4.02, 6)) == [(4, 6)]               # snapped to the split
+    assert v.segments(within=(3, 4)) == []                        # only removed video
+    assert v.segments(within=(0, 10)) == v.segments() == [(0, 3), (4, 10)]
