@@ -89,6 +89,41 @@ class VideoCut:
         self.pieces = pieces
         return True
 
+    def snap(self, t):
+        """t, or the split point / end it's within MIN_PIECE of (a range can't leave a sliver)."""
+        t = min(max(0.0, t), self.duration)
+        edges = [0.0] + [p[1] for p in self.pieces]
+        near = min(edges, key=lambda e: abs(e - t))
+        return near if abs(near - t) < MIN_PIECE else t
+
+    def set_range(self, a, b, keep):
+        """Keep or remove everything between a and b (a range dragged on the timeline): one
+        piece afterwards, split from its neighbors.  False if nothing changes, the range is too
+        short, or nothing would be left."""
+        a, b = sorted((self.snap(a), self.snap(b)))
+        if b - a < MIN_PIECE:
+            return False
+        if all(k == keep for s, e, k in self.pieces if s < b - 1e-9 and e > a + 1e-9):
+            return False                            # already that way
+        before = [list(p) for p in self.pieces if p[1] <= a + 1e-9]
+        after = [list(p) for p in self.pieces if p[0] >= b - 1e-9]
+        for s, e, k in self.pieces:
+            if s < a - 1e-9 and e > a + 1e-9:
+                before.append([s, a, k])            # the piece the range starts in
+            if s < b - 1e-9 and e > b + 1e-9:
+                after.insert(0, [b, e, k])          # the piece it ends in
+        pieces = before + [[a, b, keep]] + after
+        if not any(p[2] for p in pieces):
+            return False
+        self._push()
+        self.pieces = pieces
+        return True
+
+    def range_kept(self, a, b):
+        """Whether anything between a and b is kept (so the action on it is "remove")."""
+        a, b = sorted((a, b))
+        return any(k for s, e, k in self.pieces if s < b - 1e-9 and e > a + 1e-9)
+
     def kept(self):
         """The kept pieces, neighbors merged: [(start, end)]."""
         out = []
@@ -101,9 +136,13 @@ class VideoCut:
                 out.append((s, e))
         return out
 
-    def segments(self):
-        """For convert.Options: None when the whole video is kept."""
+    def segments(self, within=None):
+        """For convert.Options: None when the whole video is kept.  With within=(start, end) (a
+        selected range), only the kept parts inside it; [] when none are."""
         k = self.kept()
+        if within:
+            a, b = sorted((self.snap(within[0]), self.snap(within[1])))
+            k = [(max(s, a), min(e, b)) for s, e in k if min(e, b) - max(s, a) > 1e-9]
         return None if k == [(0.0, self.duration)] else k
 
     def kept_duration(self):
