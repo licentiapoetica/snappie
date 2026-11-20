@@ -48,7 +48,9 @@ class InPlaceEditor(QWidget):
         geo = screen.geometry()
         origin = geo.topLeft()
         self._near_cursor = settings.get("shot.toolbar_position") == "cursor"
-        self._anchor = (QPoint(pointer) - origin, drag_up) if self._near_cursor and pointer is not None else None
+        self._anchor = None
+        if self._near_cursor and pointer is not None:
+            self._anchor = (QPoint(pointer) - origin, drag_up)
         self._crop_press = None
         if geo.width() and abs(background.width() / background.devicePixelRatio() - geo.width()) > 1:
             background = QImage(background)     # dpr not set: derive it from the screen size
@@ -191,7 +193,8 @@ class InPlaceEditor(QWidget):
         if self._anchor is not None:
             at, above = self._anchor
             cx = at.x()
-            below_y, above_y = at.y() + GAP, at.y() - GAP - h
+            # Keep both panels outside the area, including clicks, moves and shrinking an edge.
+            below_y, above_y = sel.bottom() + GAP, sel.top() - GAP - h
             candidates = (above_y, below_y) if above else (below_y, above_y)
             y = next((y for y in candidates if MARGIN <= y and y + h <= scr.height() - MARGIN), None)
             if y is None:
@@ -231,7 +234,12 @@ class InPlaceEditor(QWidget):
     # -- input --
 
     def keyPressEvent(self, ev):
+        before = self.doc.bounds()
         if self.canvas.key(ev):
+            if self._anchor is not None and self.doc.bounds() != before:
+                self._anchor = None
+                self._place_panels(force=True)
+                self._update_around_panels()
             return
         k, mods = ev.key(), ev.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
