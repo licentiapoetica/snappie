@@ -365,6 +365,10 @@ class SettingsDialog(QDialog):
         form.addRow(self._bind("shot.cursor", QCheckBox("Include the mouse cursor")))
         form.addRow(self._bind("shot.magnifier", QCheckBox("Show a magnifier while picking")))
         form.addRow(self._bind("shot.annotate", QCheckBox("Annotate in place right after picking")))
+        position = self._bind("shot.toolbar_position", _combo([
+            ("Selection center", "selection"), ("Near cursor", "cursor")]))
+        position.setToolTip("Near cursor: above an upward drag, below otherwise; flips sides at screen edges.")
+        form.addRow("Toolbar position:", position)
         form.addRow("Window shots:", self._bind("shot.window_mode", _combo([
             ("Plain", "plain"), ("Transparent (the window's own shape)", "transparent"),
             ("With a drop shadow", "shadow")])))

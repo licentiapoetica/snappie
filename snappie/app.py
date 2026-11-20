@@ -600,7 +600,8 @@ class App(QObject):
             frames = [QRect(*w["frame"]) for w in getattr(self, "_pick_windows", [])
                       if w.get("visible") and (w.get("normal") or w.get("dialog"))]
             self.kwin.skip_taskbar(InPlaceEditor.TITLE)  # full screen too
-            ed = InPlaceEditor(scr, bg, sel.rect.intersected(scr.geometry()), frames)
+            ed = InPlaceEditor(scr, bg, sel.rect.intersected(scr.geometry()), frames,
+                               pointer=sel.pointer, drag_up=sel.drag_up)
             ed.can_record = not self.recording
             self.keep(ed)
             ed.action.connect(lambda name, doc: self._doc_action(name, doc, ed, inplace=True))

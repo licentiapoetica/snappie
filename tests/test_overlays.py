@@ -286,3 +286,41 @@ def test_picker_does_not_cancel_before_it_gains_focus(qapp):
         assert got == [] and not pk._done
     finally:
         pk._finish(None)
+
+
+@pytest.mark.parametrize("start,end", [(QPoint(20, 20), QPoint(90, 90)),
+                                       (QPoint(90, 90), QPoint(20, 20)),
+                                       (QPoint(90, 20), QPoint(20, 90)),
+                                       (QPoint(20, 90), QPoint(90, 20))])
+def test_picker_remembers_release_point_and_drag_direction(qapp, start, end):
+    pk = Picker([], NoTree(), own_pid=42, mode="shot")
+    got = picked(pk)
+    try:
+        pk.mouse_press(start, Qt.MouseButton.LeftButton)
+        pk.mouse_move(end)
+        pk.mouse_release(end, Qt.MouseButton.LeftButton)
+        assert len(got) == 1
+        assert got[0].pointer == end
+        assert got[0].drag_up == (end.y() < start.y())
+    finally:
+        pk._finish(None)
+
+
+@pytest.mark.parametrize("use_mouse", [False, True])
+def test_picker_distinguishes_click_from_keyboard_selection(qapp, use_mouse):
+    pk = Picker([], NoTree(), own_pid=42, mode="shot")
+    got = picked(pk)
+    at = QPoint(50, 50)
+    try:
+        pk.mouse_move(at)
+        if use_mouse:
+            pk.mouse_press(at, Qt.MouseButton.LeftButton)
+            pk.mouse_release(at, Qt.MouseButton.LeftButton)
+        else:
+            pk._refresh()
+            pk.select_current()
+        assert len(got) == 1
+        assert got[0].pointer == (at if use_mouse else None)
+        assert not got[0].drag_up
+    finally:
+        pk._finish(None)

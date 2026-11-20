@@ -27,6 +27,7 @@ DEFAULTS = {
     "shot.quality": 92,                   # jpg / webp quality
     "shot.cursor": False,                 # include the mouse cursor
     "shot.annotate": True,                # show the in-place editor after picking
+    "shot.toolbar_position": "selection", # selection | cursor
     "shot.after": ["copy", "save"],       # run on Enter in the editor, or right away without it
                                           # (any of: copy, save, upload, pin, ocr, edit)
     "shot.window_mode": "plain",          # plain | transparent | shadow (whole-window shots)
